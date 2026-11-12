@@ -1,0 +1,309 @@
+"""`fosc -v -p <port>` -- localhost-only web panel (stdlib HTTP server + SSE).
+
+Hunts launched from the panel run as detached `bin/fosc -h` processes, so
+closing the viewer never kills them. The panel itself only reads RunState
+files and writes control files (PAUSE/STOP) and ~/.fosc/config.json.
+
+Hardening, since this panel can launch real hunts:
+  - binds 127.0.0.1 only, no flag to widen it
+  - Host header must be 127.0.0.1/localhost (blocks DNS rebinding)
+  - every POST needs the X-FOSC header and a same-origin Origin (blocks CSRF
+    from any other site open in the browser)
+"""
+import hashlib
+import http.server
+import json
+import os
+import re
+import subprocess
+import time
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+from . import config, knowledge
+from .claude_runner import stream_to_text
+from .notify import send_telegram
+from .state import RunState, list_runs
+
+WEB_DIR = Path(__file__).resolve().parent / "web"
+STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
+          "/app.css": ("app.css", "text/css; charset=utf-8"),
+          "/app.js": ("app.js", "application/javascript; charset=utf-8"),
+          "/logo.svg": ("logo.svg", "image/svg+xml")}
+TARGET_RX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-:/_]{0,250}$")
+LIVE = ("running", "paused", "sleeping", "recon")
+
+
+def overview() -> dict:
+    targets, tot_conf, tot_cost = [], 0, 0.0
+    for st in list_runs():
+        snap = st.snapshot(results=0, activity=0)
+        m = snap["meta"]
+        targets.append({
+            "target": st.target, "status": snap["status"], "confirmed": snap["confirmed_count"],
+            "severity": snap["severity"], "cost": m.get("cost_usd") or 0, "done": snap["done"],
+            "surface_total": snap["surface_total"], "round": m.get("round"),
+            "started_at": m.get("started_at"),
+        })
+        tot_conf += snap["confirmed_count"]
+        tot_cost += m.get("cost_usd") or 0
+    targets.sort(key=lambda t: (t["status"] not in LIVE, -(t["started_at"] or 0)))
+    return {"version": config.VERSION, "targets": targets,
+            "totals": {"confirmed": tot_conf, "cost": round(tot_cost, 4),
+                       "live": sum(1 for t in targets if t["status"] in LIVE)}}
+
+
+def start_hunt(p: dict) -> dict:
+    target = (p.get("target") or "").strip()
+    if not TARGET_RX.match(target):
+        return {"ok": False, "error": "alvo inválido"}
+    st = RunState(target)
+    if st.status() in LIVE:
+        return {"ok": False, "error": f"já existe uma caçada rodando em {target}"}
+    st.stop_path.unlink(missing_ok=True)
+    st.pause_path.unlink(missing_ok=True)
+    argv = [str(config.FOSC_BIN), "-h", "-a", target,
+            "--workers", str(max(1, min(8, int(p.get("workers") or config.DEFAULT_WORKERS)))),
+            "--timeout", str(max(60, int(p.get("timeout") or config.DEFAULT_TASK_TIMEOUT)))]
+    if p.get("max_items"):
+        argv += ["--max-items", str(max(1, int(p["max_items"])))]
+    if p.get("continuous"):
+        argv += ["--continuous", "--interval", str(max(60, int(p.get("interval") or config.DEFAULT_CONTINUOUS_INTERVAL)))]
+    if p.get("fresh"):
+        argv.append("--fresh")
+    if p.get("no_nuclei"):
+        argv.append("--no-nuclei")
+    scope = (p.get("scope") or "").strip()
+    if scope:
+        argv += ["--scope", scope[:500]]
+    log = st.log_path.open("a")
+    log.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} launched from viewer =====\n")
+    log.flush()
+    proc = subprocess.Popen(argv, cwd=str(config.REPO_ROOT), stdout=log, stderr=subprocess.STDOUT,
+                            stdin=subprocess.DEVNULL, start_new_session=True, env=os.environ.copy())
+    st.write_meta(target=target, pid=proc.pid, status="recon", started_at=time.time())
+    return {"ok": True, "pid": proc.pid}
+
+
+def control(p: dict) -> dict:
+    target, action = (p.get("target") or "").strip(), p.get("action")
+    if not target:
+        return {"ok": False, "error": "alvo obrigatório"}
+    if not config.run_exists(target):
+        return {"ok": False, "error": "alvo desconhecido"}
+    st = RunState(target)
+    if action == "pause":
+        st.pause_path.write_text("paused via viewer\n")
+    elif action == "resume":
+        st.pause_path.unlink(missing_ok=True)
+    elif action == "stop":
+        st.stop_path.write_text("stop requested via viewer\n")
+        st.pause_path.unlink(missing_ok=True)
+    else:
+        return {"ok": False, "error": "ação inválida"}
+    st.activity(None, f"{action} requested from viewer", kind="system")
+    return {"ok": True}
+
+
+def finding_detail(target: str, fid: str) -> dict:
+    if not config.run_exists(target):
+        return {"ok": False, "error": "alvo desconhecido"}
+    st = RunState(target)
+    for f in st.confirmed():
+        if f.get("id") == fid:
+            report = ""
+            if f.get("report_path"):
+                rp = (st.dir / f["report_path"]).resolve()
+                if st.dir.resolve() in rp.parents and rp.exists():
+                    report = rp.read_text(errors="replace")
+            return {"ok": True, "finding": f, "report": report}
+    return {"ok": False, "error": "achado não encontrado"}
+
+
+def task_log(target: str, iid: str) -> dict:
+    if not re.fullmatch(r"[0-9a-f]{16}", iid or ""):
+        return {"ok": False, "error": "id inválido"}
+    if not config.run_exists(target):
+        return {"ok": False, "error": "alvo desconhecido"}
+    st = RunState(target)
+    tdir = st.dir / "tasks" / iid
+    return {"ok": True, "hunt": stream_to_text(tdir / "stream.jsonl"),
+            "review": stream_to_text(tdir / "verify.stream.jsonl")}
+
+
+CHAT_MODELS = {"sonnet", "opus", "haiku"}
+
+
+def chat_history(target: str) -> dict:
+    from .chat import ChatStore
+    key = (target or "").strip() or "_global"
+    store = ChatStore(key)
+    return {"ok": True, "key": key, "target": (target or "").strip() or None,
+            "messages": store.messages()[-200:], "live": store.live()}
+
+
+def chat_send(p: dict) -> dict:
+    from .chat import ChatStore
+    message = str(p.get("message", ""))
+    target = (p.get("target") or "").strip() or None
+    model = str(p.get("model") or config.HUNT_MODEL)
+    if model not in CHAT_MODELS:
+        model = config.HUNT_MODEL
+    key = target or "_global"
+    store = ChatStore(key)
+    state = RunState(target) if (target and config.run_exists(target)) else None
+    scope = (state.read_meta().get("scope") if state else None) or target
+    return store.post(message, state, target, scope, model, config.DEFAULT_TASK_TIMEOUT)
+
+
+def get_config() -> dict:
+    cfg = config.load_user_config()
+    tok = cfg.get("telegram_token") or ""
+    return {"telegram_configured": bool(tok and cfg.get("telegram_chat_id")),
+            "telegram_chat_id": cfg.get("telegram_chat_id") or "",
+            "telegram_token_masked": (tok[:6] + "…" + tok[-4:]) if len(tok) > 12 else ("•" * len(tok))}
+
+
+def set_config(p: dict) -> dict:
+    cfg = config.load_user_config()
+    if p.get("telegram_token"):
+        cfg["telegram_token"] = p["telegram_token"].strip()
+    if "telegram_chat_id" in p:
+        cfg["telegram_chat_id"] = str(p["telegram_chat_id"]).strip()
+    config.save_user_config(cfg)
+    return {"ok": True, **get_config()}
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    server_version = "FOSC-Viewer"
+    port = 5555
+
+    def log_message(self, fmt, *args):
+        pass
+
+    # -- guards ----------------------------------------------------------
+    def _host_ok(self) -> bool:
+        host = (self.headers.get("Host") or "").lower()
+        return host in (f"127.0.0.1:{self.port}", f"localhost:{self.port}")
+
+    def _post_ok(self) -> bool:
+        if self.headers.get("X-FOSC") != "1":
+            return False
+        origin = self.headers.get("Origin")
+        return origin in (None, f"http://127.0.0.1:{self.port}", f"http://localhost:{self.port}")
+
+    # -- responses -------------------------------------------------------
+    def _send(self, body: bytes, ctype: str, status=200):
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Security-Policy",
+                         "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
+                         "connect-src 'self'; frame-ancestors 'none'")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, obj, status=200):
+        self._send(json.dumps(obj).encode(), "application/json", status)
+
+    def do_GET(self):
+        if not self._host_ok():
+            return self._json({"error": "bad host"}, 403)
+        u = urlparse(self.path)
+        q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        if u.path in STATIC:
+            name, ctype = STATIC[u.path]
+            return self._send((WEB_DIR / name).read_bytes(), ctype)
+        if u.path == "/api/overview":
+            return self._json(overview())
+        if u.path == "/api/state":
+            if not q.get("target"):
+                return self._json({"error": "target obrigatório"}, 400)
+            if not config.run_exists(q["target"]):
+                return self._json({"error": "alvo desconhecido"}, 404)
+            return self._json(RunState(q["target"]).snapshot())
+        if u.path == "/api/finding":
+            return self._json(finding_detail(q.get("target", ""), q.get("id", "")))
+        if u.path == "/api/log":
+            return self._json(task_log(q.get("target", ""), q.get("item_id", "")))
+        if u.path == "/api/config":
+            return self._json(get_config())
+        if u.path == "/api/chat":
+            return self._json(chat_history(q.get("target", "")))
+        if u.path == "/api/knowledge":
+            return self._json({"playbook": knowledge.read_playbook(), "stats": knowledge.stats_summary(),
+                               "lessons": knowledge.all_lessons(200)})
+        if u.path == "/api/events":
+            return self._sse(q.get("target"))
+        return self._json({"error": "not found"}, 404)
+
+    def do_POST(self):
+        if not self._host_ok() or not self._post_ok():
+            return self._json({"error": "forbidden"}, 403)
+        length = min(int(self.headers.get("Content-Length") or 0), 200_000)
+        try:
+            p = json.loads(self.rfile.read(length).decode() or "{}") if length else {}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return self._json({"error": "json inválido"}, 400)
+        path = urlparse(self.path).path
+        try:
+            if path == "/api/hunt":
+                return self._json(start_hunt(p))
+            if path == "/api/control":
+                return self._json(control(p))
+            if path == "/api/chat":
+                return self._json(chat_send(p))
+            if path == "/api/config":
+                return self._json(set_config(p))
+            if path == "/api/telegram/test":
+                ok, err = send_telegram("✅ <b>FOSC</b>: notificações do Telegram funcionando.")
+                return self._json({"ok": ok, "error": err})
+            if path == "/api/knowledge/playbook":
+                knowledge.write_playbook(str(p.get("text", ""))[:20000])
+                return self._json({"ok": True})
+            if path == "/api/knowledge/delete":
+                return self._json({"ok": knowledge.delete_lesson(str(p.get("id", "")))})
+        except (ValueError, TypeError) as e:
+            return self._json({"ok": False, "error": str(e)}, 400)
+        return self._json({"error": "not found"}, 404)
+
+    def _sse(self, target):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        last = {}
+        try:
+            while True:
+                payloads = {"overview": overview()}
+                if target and config.run_exists(target):
+                    payloads["state"] = RunState(target).snapshot()
+                for name, obj in payloads.items():
+                    body = json.dumps(obj)
+                    h = hashlib.sha1(body.encode()).hexdigest()
+                    if last.get(name) != h:
+                        last[name] = h
+                        self.wfile.write(f"event: {name}\ndata: {body}\n\n".encode())
+                self.wfile.write(b": ping\n\n")
+                self.wfile.flush()
+                time.sleep(1.5)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return
+
+
+def run_viewer(port: int, preselect_target: str | None = None):
+    Handler.port = port
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server.daemon_threads = True
+    url = f"http://127.0.0.1:{port}/" + (f"#/t/{preselect_target}" if preselect_target else "")
+    print(f"[fosc] viewer: {url}  (127.0.0.1 only · Ctrl+C para fechar; caçadas continuam rodando)")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()

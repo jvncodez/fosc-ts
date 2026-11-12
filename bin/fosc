@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Wrapper so `fosc` can be run/symlinked without activating the venv.
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "$DIR/.venv/bin/python" -m fosc.cli "$@"

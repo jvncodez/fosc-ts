@@ -1,0 +1,4 @@
+# FOSC shells out to subfinder, httpx, katana and the claude CLI (all
+# expected on PATH). The only third-party Python dependency is for the
+# `fosc watch` live terminal dashboard.
+rich

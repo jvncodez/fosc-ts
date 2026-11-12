@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# runtime state & secrets (never commit)
+.fosc/
+.bb-sentinela/
+*.log
+config.json
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

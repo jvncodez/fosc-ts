@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FOSC</title>
+<link rel="icon" href="/logo.svg">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <img src="/logo.svg" alt="" class="brand-logo">
+      <div>
+        <div class="brand-name">FOSC</div>
+        <div class="brand-sub" id="version">—</div>
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-block" id="btnNewHunt">
+      <span class="plus">+</span> Nova caçada
+    </button>
+
+    <div class="side-totals" id="sideTotals"></div>
+
+    <div class="side-label">Alvos</div>
+    <nav class="targets" id="targetList"></nav>
+
+    <div class="side-spacer"></div>
+    <nav class="side-nav">
+      <a href="#/" data-view="hunts" class="nav-link">Caçadas</a>
+      <a href="#/chat" data-view="chat" class="nav-link">Conversa</a>
+      <a href="#/knowledge" data-view="knowledge" class="nav-link">Aprendizado</a>
+      <a href="#/settings" data-view="settings" class="nav-link">Configurações</a>
+    </nav>
+    <div class="side-foot"><span class="dot dot-live"></span> 127.0.0.1 only</div>
+  </aside>
+
+  <main class="main">
+
+    <!-- ============ HUNT VIEW ============ -->
+    <section class="view" id="viewHunt">
+      <div class="empty-state" id="emptyHunt">
+        <img src="/logo.svg" alt="" class="empty-logo">
+        <h2>Nenhum alvo selecionado</h2>
+        <p>Escolha um alvo na barra lateral ou comece uma caçada nova.</p>
+        <button class="btn btn-primary" id="btnNewHunt2">+ Nova caçada</button>
+      </div>
+
+      <div id="huntContent" hidden>
+        <header class="page-head">
+          <div>
+            <div class="eyebrow">Caçada</div>
+            <h1 id="tTitle">—</h1>
+            <div class="head-meta" id="tMeta"></div>
+          </div>
+          <div class="head-actions">
+            <span class="pill" id="tStatus">—</span>
+            <button class="btn btn-ghost" id="btnPause">Pausar</button>
+            <button class="btn btn-ghost" id="btnResume" hidden>Retomar</button>
+            <button class="btn btn-danger" id="btnStop">Parar</button>
+            <button class="btn btn-ghost" id="btnRestart" hidden>Caçar de novo</button>
+          </div>
+        </header>
+
+        <div class="kpis" id="kpis"></div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head">
+              <h3>Atividade ao vivo</h3>
+              <label class="toggle-sm"><input type="checkbox" id="feedAuto" checked> auto-scroll</label>
+            </div>
+            <div class="feed" id="feed"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Em voo</h3><span class="muted" id="activeCount"></span></div>
+            <div class="inflight" id="inflight"></div>
+            <div class="card-head mt"><h3>Ritmo</h3><span class="muted">endpoints testados / 10 min</span></div>
+            <div class="spark" id="spark"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Achados confirmados</h3><span class="muted" id="confCount"></span></div>
+          <div class="findings" id="findings"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Resultados</h3>
+            <div class="filters">
+              <div class="chips" id="chips"></div>
+              <input type="search" id="search" placeholder="filtrar por URL ou classe…">
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="table" id="resultsTable">
+              <thead><tr><th>Veredito</th><th>Classe</th><th>Endpoint</th><th>Resumo</th><th class="num">Custo</th><th class="num">Quando</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ KNOWLEDGE VIEW ============ -->
+    <section class="view" id="viewKnowledge" hidden>
+      <header class="page-head">
+        <div>
+          <div class="eyebrow">Memória entre caçadas</div>
+          <h1>Aprendizado</h1>
+          <div class="head-meta">Cada caçada grava lições aqui. As mais relevantes entram no prompt do próximo item, e o ranking usa a taxa de acerto por tecnologia e classe.</div>
+        </div>
+      </header>
+      <div class="kpis" id="kKpis"></div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>Acerto por classe</h3></div>
+          <div id="kByClass"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>O que funcionou por tecnologia</h3></div>
+          <div id="kByTech"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h3>Playbook consolidado</h3>
+          <button class="btn btn-ghost btn-sm" id="btnSavePlaybook">Salvar</button>
+        </div>
+        <textarea id="playbook" class="playbook" spellcheck="false" placeholder="O playbook é gerado automaticamente depois das primeiras caçadas…"></textarea>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h3>Lições recentes</h3>
+          <div class="chips" id="kChips"></div>
+        </div>
+        <div id="kLessons" class="lessons"></div>
+      </div>
+    </section>
+
+    <!-- ============ CHAT VIEW ============ -->
+    <section class="view" id="viewChat" hidden>
+      <header class="page-head">
+        <div>
+          <div class="eyebrow">FOSC AGENT</div>
+          <h1>Conversa</h1>
+          <div class="head-meta">Converse com o agente de pentest. Com um alvo em contexto ele conhece os achados e pode testar o alvo ao vivo; sem alvo, é um assistente geral de segurança ofensiva.</div>
+        </div>
+        <div class="head-actions">
+          <input id="chatTargetInput" class="select" placeholder="alvo.com ou https://app.alvo.com" hidden>
+          <select id="chatCtx" class="select" title="contexto da conversa"></select>
+          <button class="btn btn-ghost btn-sm" id="chatSetTarget" title="informar um alvo">+ alvo</button>
+          <select id="chatModel" class="select" title="modelo">
+            <option value="sonnet">Sonnet</option>
+            <option value="opus">Opus</option>
+          </select>
+        </div>
+      </header>
+      <div class="card chat-card">
+        <div class="chat-log" id="chatLog"></div>
+        <div class="chat-activity" id="chatActivity" hidden></div>
+        <form class="chat-input" id="chatForm" autocomplete="off">
+          <textarea id="chatText" rows="1" placeholder="Pergunte algo…  (Enter envia · Shift+Enter nova linha)"></textarea>
+          <button class="btn btn-primary" type="submit" id="chatSend">Enviar</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- ============ SETTINGS VIEW ============ -->
+    <section class="view" id="viewSettings" hidden>
+      <header class="page-head">
+        <div>
+          <div class="eyebrow">Preferências</div>
+          <h1>Configurações</h1>
+        </div>
+      </header>
+      <div class="card settings">
+        <div class="card-head"><h3>Telegram</h3><span class="pill" id="tgStatus">—</span></div>
+        <p class="muted">Avisa no Telegram toda vez que um achado passa pela revisão do Opus. Crie um bot com o @BotFather, mande uma mensagem para ele e use o seu chat id.</p>
+        <div class="form-row">
+          <label>Bot token<input type="password" id="tgToken" placeholder="manter o atual" autocomplete="off"></label>
+          <label>Chat id<input type="text" id="tgChat" placeholder="123456789"></label>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" id="btnSaveTg">Salvar</button>
+          <button class="btn btn-ghost" id="btnTestTg">Enviar teste</button>
+        </div>
+      </div>
+      <div class="card settings">
+        <div class="card-head"><h3>Painel</h3></div>
+        <label class="check"><input type="checkbox" id="soundToggle"> Tocar som quando um achado for confirmado</label>
+        <p class="muted">O painel só escuta em 127.0.0.1 e recusa requisições de outras origens. As caçadas rodam como processos próprios e continuam mesmo se você fechar o painel.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- drawer -->
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <div id="dHead"></div>
+    <button class="icon-btn" id="dClose" aria-label="fechar">✕</button>
+  </div>
+  <div class="drawer-tabs" id="dTabs"></div>
+  <div class="drawer-body" id="dBody"></div>
+</aside>
+
+<!-- new hunt modal -->
+<div class="modal-wrap" id="modal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h2>Nova caçada</h2>
+      <button class="icon-btn" id="mClose" aria-label="fechar">✕</button>
+    </div>
+    <form id="huntForm" autocomplete="off">
+      <label class="full">Alvo<input type="text" id="fTarget" placeholder="alvo.com ou https://app.alvo.com" required></label>
+      <label class="full">Escopo (opcional)<input type="text" id="fScope" placeholder="ex.: *.alvo.com, exceto pagamentos.alvo.com"></label>
+      <div class="form-row">
+        <label>Workers<input type="number" id="fWorkers" value="2" min="1" max="8"></label>
+        <label>Timeout por item (s)<input type="number" id="fTimeout" value="600" min="60"></label>
+        <label>Máx. itens<input type="number" id="fMax" placeholder="todos" min="1"></label>
+      </div>
+      <div class="switches">
+        <label class="switch"><input type="checkbox" id="fCont"><span></span> Contínuo (nunca para, refaz o recon)</label>
+        <label class="switch"><input type="checkbox" id="fFresh"><span></span> Começar do zero (ignora cache)</label>
+        <label class="switch"><input type="checkbox" id="fNoNuclei"><span></span> Pular nuclei no recon</label>
+      </div>
+      <p class="muted small">Cada endpoint usa uma sessão do Claude (Sonnet). Achados marcados como confirmados passam por uma revisão adversarial com o Opus. Para um alvo novo, comece com um limite de itens.</p>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" id="mCancel">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Começar caçada</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+<script src="/app.js"></script>
+</body>
+</html>

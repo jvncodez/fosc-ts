@@ -1,0 +1,126 @@
+"""Paths, defaults and the small user config file (~/.fosc/config.json)."""
+import json
+import os
+from pathlib import Path
+
+VERSION = "0.2.0-bb"
+
+HOME = Path(os.path.expanduser("~"))
+# Isolated state root for the Banco do Brasil governance build, so its runs,
+# knowledge and audit trail never mix with the base FOSC install. Override with
+# the SENTINELA_HOME env var (useful on AWS/Kiro).
+FOSC_HOME = Path(os.environ.get("SENTINELA_HOME", str(HOME / ".bb-sentinela")))
+STATE_ROOT = FOSC_HOME / "runs"
+KNOWLEDGE_ROOT = FOSC_HOME / "knowledge"
+CHAT_ROOT = FOSC_HOME / "chat"
+CONFIG_PATH = FOSC_HOME / "config.json"
+
+# repo root, used by the viewer to spawn detached `bin/fosc -h` processes
+REPO_ROOT = Path(__file__).resolve().parents[1]
+FOSC_BIN = REPO_ROOT / "bin" / "fosc"
+
+DEFAULT_WORKERS = 2
+DEFAULT_TASK_TIMEOUT = 1200         # seconds per headless claude hunt task (deep, persistent)
+DEFAULT_VERIFY_TIMEOUT = 480        # seconds for the adversarial Opus review
+DEFAULT_CONTINUOUS_INTERVAL = 1800  # seconds between recon refresh passes
+DEFAULT_RECON_TIMEOUT = 180         # seconds per external recon tool call
+MAX_ARCHIVE_URLS = 3000             # cap on gau/waybackurls output per run
+
+# Active content discovery (directory/file brute-force) — finds the unlinked
+# endpoints that passive sources (gau/wayback/katana) never see. feroxbuster
+# (recursive) is preferred, ffuf is the fallback.
+CONTENT_DISCOVERY = True
+CONTENT_WORDLISTS = [                # first one that exists on disk is used
+    "/usr/share/seclists/Discovery/Web-Content/raft-small-words.txt",
+    "/usr/share/seclists/Discovery/Web-Content/common.txt",
+    "/usr/share/wordlists/dirb/common.txt",
+]
+CONTENT_EXTENSIONS = "php,html,sql,ini,bak,txt,old,json,conf,inc,zip,env,git,asp,aspx,jsp,do"
+CONTENT_DEPTH = 2                    # feroxbuster recursion depth
+CONTENT_TIMEOUT = 240               # seconds budget per base URL scan
+CONTENT_MAX_BASES = 6               # cap how many base URLs we brute-force
+CONTENT_MAX_RESULTS = 1500          # cap discovered URLs fed to the surface
+CONTENT_STATUS = "200,204,301,302,307,401,403,405"
+
+# DNS subdomain brute-force (domain targets only; skipped for IP/URL/localhost).
+# dnsx resolves a wordlist of candidate subdomains against the target apex.
+DNS_BRUTE = True
+DNS_WORDLISTS = [                   # first one that exists on disk is used
+    "/usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
+    "/usr/share/seclists/Discovery/DNS/dns-Jhaddix.txt",
+]
+
+CLAUDE_BIN = "claude"
+HUNT_MODEL = "sonnet"
+VERIFY_MODEL = "opus"
+CONSOLIDATE_MODEL = "sonnet"
+
+# Depth controls. FOSC hunts deep and persistent by default; budget caps keep a
+# single endpoint from running away. budget 0 = uncapped.
+HUNT_EFFORT = "high"                 # reasoning effort per hunt task
+VERIFY_EFFORT = "high"               # reasoning effort for the Opus review
+DEFAULT_TASK_BUDGET_USD = 3.0        # max spend per endpoint (0 = uncapped)
+
+# Privesc is deeper than a single web endpoint: more enumeration, more retries,
+# more research-and-install detours. It gets its own (larger) caps and a bounded
+# multi-pass loop that feeds each pass's enumeration back into the next.
+PRIVESC_TIMEOUT = 2400               # seconds per privesc pass
+PRIVESC_BUDGET_USD = 6.0             # max spend across the whole privesc stage
+PRIVESC_MAX_PASSES = 3               # stop after a win, or after this many passes
+
+# Connectivity. If a task streams nothing for this long, FOSC probes the network
+# and, if offline, kills the (silently-retrying) claude process and says so,
+# instead of spinning until the hard timeout.
+NET_WATCHDOG_SECS = 25
+
+# SPA support: mine API endpoints out of JS bundles (a hash-router SPA exposes no
+# routes to a crawler, so without this the hunt queue is empty).
+JS_MINING = True
+
+VULN_BUNDLE = [
+    "IDOR", "broken auth / session handling", "SSRF", "XSS (reflected/stored/DOM)",
+    "SQLi / NoSQLi", "open redirect", "path traversal / LFI", "SSTI",
+    "business logic abuse (price/qty/race condition)", "mass assignment",
+    "file upload bypass", "API auth bypass / missing authZ on object access",
+]
+
+# never queued as hunt items; .js URLs are still kept as context for the agent
+STATIC_EXT = {
+    ".js", ".mjs", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico",
+    ".woff", ".woff2", ".ttf", ".eot", ".otf", ".map", ".mp4", ".mp3", ".webm",
+    ".pdf", ".zip", ".gz",
+}
+
+SEVERITIES = ["critical", "high", "medium", "low", "info"]
+
+
+def safe_name(target: str) -> str:
+    return target.replace("/", "_").replace(":", "_")
+
+
+def run_exists(target: str) -> bool:
+    """True if a run dir already exists (read-only paths must not create one)."""
+    return (STATE_ROOT / safe_name(target)).is_dir()
+
+
+def run_dir(target: str) -> Path:
+    d = STATE_ROOT / safe_name(target)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "tasks").mkdir(exist_ok=True)
+    (d / "pocs").mkdir(exist_ok=True)
+    return d
+
+
+def load_user_config() -> dict:
+    if not CONFIG_PATH.exists():
+        return {}
+    try:
+        return json.loads(CONFIG_PATH.read_text())
+    except json.JSONDecodeError:
+        return {}
+
+
+def save_user_config(cfg: dict):
+    FOSC_HOME.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
+    os.chmod(CONFIG_PATH, 0o600)

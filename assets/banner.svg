@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="690" height="362" viewBox="0 0 690 362" role="img" aria-label="FOSC AGENT">
+  <defs>
+    <linearGradient id="red" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff5c5c"/>
+      <stop offset="45%" stop-color="#ee2830"/>
+      <stop offset="100%" stop-color="#96061a"/>
+    </linearGradient>
+  </defs>
+  <rect width="690" height="362" rx="14" fill="#0a0a0c"/>
+  <rect x="1.5" y="1.5" width="687" height="359" rx="13" fill="none" stroke="#2a0d10" stroke-width="1"/>
+  <text xml:space="preserve" font-family="'DejaVu Sans Mono','Cascadia Code','JetBrains Mono','Menlo','Consolas',monospace" font-size="24" font-weight="700" fill="url(#red)">
+      <tspan x="28" dy="30">███████╗ ██████╗ ███████╗ ██████╗</tspan>
+      <tspan x="28" dy="24">██╔════╝██╔═══██╗██╔════╝██╔════╝</tspan>
+      <tspan x="28" dy="24">█████╗  ██║   ██║███████╗██║     </tspan>
+      <tspan x="28" dy="24">██╔══╝  ██║   ██║╚════██║██║     </tspan>
+      <tspan x="28" dy="24">██║     ╚██████╔╝███████║╚██████╗</tspan>
+      <tspan x="28" dy="24">╚═╝      ╚═════╝ ╚══════╝ ╚═════╝</tspan>
+      <tspan x="28" dy="24"></tspan>
+      <tspan x="28" dy="24"> █████╗  ██████╗ ███████╗███╗   ██╗████████╗</tspan>
+      <tspan x="28" dy="24">██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝</tspan>
+      <tspan x="28" dy="24">███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   </tspan>
+      <tspan x="28" dy="24">██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   </tspan>
+      <tspan x="28" dy="24">██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   </tspan>
+      <tspan x="28" dy="24">╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   </tspan>
+  </text>
+</svg>
