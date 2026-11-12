@@ -498,5 +498,289 @@ class PrivescStageTests(unittest.TestCase):
         self.assertNotIn("alert(1)", loot)            # non-cred finding filtered out
 
 
+class ModelRouterTests(unittest.TestCase):
+    """The model layer: provider is config, and a failing/refusing/slow model
+    fails over to the next WITHOUT the caller knowing. No app rewrite, per the
+    BB AWS/Bedrock requirement."""
+
+    def setUp(self):
+        self.tmp = isolate(self)
+        from fosc import models
+        self.models = models
+        self._saved = (config.MODEL_PROVIDER, dict(config.MODEL_LADDERS), config.MODEL_MAX_ATTEMPTS)
+        config.MODEL_PROVIDER = "anthropic"
+        config.MODEL_LADDERS = {"hunt": ["sonnet", "haiku"], "verify": ["opus", "sonnet"]}
+        config.MODEL_MAX_ATTEMPTS = 3
+
+    def tearDown(self):
+        config.MODEL_PROVIDER, config.MODEL_LADDERS, config.MODEL_MAX_ATTEMPTS = self._saved
+
+    def _patch(self, scripted):
+        calls = []
+
+        def fake(prompt, cwd, timeout, stream_path, *, model, system_prompt,
+                 schema=None, on_activity=None, allow_tools=True, effort=None,
+                 budget=None, env_extra=None):
+            Path(stream_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(stream_path).write_text(f"stream for {model}\n")
+            calls.append({"model": model, "env": env_extra})
+            return dict(scripted[len(calls) - 1])
+        self.models.run_claude = fake
+        return calls
+
+    def _run(self, role="hunt", on_activity=None):
+        return self.models.run(role, "p", cwd=self.tmp / "t", timeout=100,
+                               stream_path=self.tmp / "t" / "s.jsonl",
+                               system_prompt="x", on_activity=on_activity)
+
+    def test_resolve_provider_from_config(self):
+        self.assertEqual(self.models.resolve("sonnet").env["CLAUDE_CODE_USE_BEDROCK"], "0")
+        self.assertEqual(self.models.resolve("bedrock:opus").env["CLAUDE_CODE_USE_BEDROCK"], "1")
+        self.assertEqual(self.models.resolve("bedrock:sonnet").model_id,
+                         config.BEDROCK_MODEL_IDS["sonnet"])
+
+    def test_failover_on_error(self):
+        calls = self._patch([
+            {"output": None, "cost": 0.01, "status": "error", "error": "500"},
+            {"output": {"ok": 1}, "cost": 0.02, "status": "ok", "error": None},
+        ])
+        msgs = []
+        r = self._run(on_activity=msgs.append)
+        self.assertEqual(r["status"], "ok")
+        self.assertEqual(r["model"], "anthropic:haiku")          # second model answered
+        self.assertEqual([c["model"] for c in calls], ["sonnet", "haiku"])
+        self.assertAlmostEqual(r["cost"], 0.03)                  # both attempts charged
+        self.assertEqual(len(r["attempts"]), 2)
+        self.assertTrue(any("failover" in m for m in msgs))
+
+    def test_failover_on_refusal(self):
+        self._patch([
+            {"output": None, "cost": 0.0, "status": "refused", "error": "declined"},
+            {"output": {"ok": 1}, "cost": 0.02, "status": "ok", "error": None},
+        ])
+        r = self._run()
+        self.assertEqual(r["status"], "ok")
+        self.assertEqual(r["attempts"][0]["status"], "refused")
+
+    def test_offline_does_not_failover(self):
+        calls = self._patch([
+            {"output": None, "cost": 0.0, "status": "offline", "error": "sem internet"},
+            {"output": {"ok": 1}, "cost": 0.02, "status": "ok", "error": None},
+        ])
+        r = self._run()
+        self.assertEqual(r["status"], "offline")                 # stops immediately
+        self.assertEqual(len(calls), 1)                          # second model never tried
+
+    def test_all_fail_returns_last(self):
+        self._patch([
+            {"output": None, "cost": 0.01, "status": "error", "error": "a"},
+            {"output": None, "cost": 0.01, "status": "timeout", "error": "b"},
+        ])
+        r = self._run()
+        self.assertEqual(r["status"], "timeout")
+        self.assertEqual(len(r["attempts"]), 2)
+        self.assertAlmostEqual(r["cost"], 0.02)
+
+    def test_failed_attempt_stream_preserved(self):
+        self._patch([
+            {"output": None, "cost": 0.0, "status": "error", "error": "a"},
+            {"output": {"ok": 1}, "cost": 0.0, "status": "ok", "error": None},
+        ])
+        self._run()
+        self.assertTrue((self.tmp / "t" / "s.try0.jsonl").exists())  # first try kept
+        self.assertTrue((self.tmp / "t" / "s.jsonl").exists())       # winner at canonical path
+
+
+class AuditTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = isolate(self)
+        from fosc.audit import AuditLog
+        self.path = self.tmp / "audit.jsonl"
+        self.log = AuditLog(self.path)
+
+    def test_chain_links_and_verifies(self):
+        self.log.record("run_start", actor="x", target="t")
+        self.log.record("plan", hypothesis="h")
+        self.log.record("finding", severity="high")
+        ok, n, _ = self.log.verify()
+        self.assertTrue(ok)
+        self.assertEqual(n, 3)
+        e = self.log.entries()
+        self.assertEqual(e[0]["prev"], "0" * 64)
+        self.assertEqual(e[1]["prev"], e[0]["hash"])     # each links to the previous
+
+    def test_tamper_is_detected(self):
+        self.log.record("a", x=1)
+        self.log.record("b", x=2)
+        lines = self.path.read_text().splitlines()
+        rec = json.loads(lines[0])
+        rec["data"]["x"] = 999                            # edit a past record
+        lines[0] = json.dumps(rec)
+        self.path.write_text("\n".join(lines) + "\n")
+        ok, idx, _ = self.log.verify()
+        self.assertFalse(ok)                              # broken chain caught
+        self.assertEqual(idx, 0)
+
+    def test_redact_minimizes_pii(self):
+        from fosc import audit
+        out = audit.redact("mail joao@banco.com cpf 123.456.789-00 cartao 4111111111111111")
+        self.assertNotIn("joao@banco.com", out)
+        self.assertIn("@banco.com", out)                  # kept recognizable, local masked
+        self.assertIn("***.***.***-**", out)
+        self.assertNotIn("4111111111111111", out)
+
+
+class PlanTests(unittest.TestCase):
+    def test_hunt_plan_has_all_four_elements(self):
+        from fosc import plan
+        p = plan.hunt_plan({"url": "http://x/a"}, ["IDOR", "SQLi"],
+                           budget=1.0, timeout=600, scope_label="x [estrito]")
+        for k in ("hypothesis", "action", "expected_result", "stop_condition"):
+            self.assertTrue(p[k])
+        self.assertIn("IDOR", p["hypothesis"])
+        self.assertIn("600", p["stop_condition"])         # bounded, explicit
+
+
+class AuthzProhibitedTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = isolate(self)
+
+    def test_prohibited_tier(self):
+        from fosc import authz
+        self.assertEqual(authz.risk("dos"), "prohibited")
+        self.assertEqual(authz.risk("recon"), "passive")
+
+    def test_prohibited_refused_even_in_yolo(self):
+        from fosc import authz
+        store = authz.ApprovalStore(self.tmp / "ap.jsonl")
+        dec = authz.require(store, "ddos", "t", mode="yolo")   # no mode can enable it
+        self.assertFalse(dec.approved)
+        self.assertEqual(dec.status, "prohibited")
+
+
+class HaltTests(unittest.TestCase):
+    def test_kill_all_kills_registered_tasks(self):
+        import subprocess
+        import signal
+        from fosc import claude_runner
+        p = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        pgid = os.getpgid(p.pid)
+        with claude_runner._LIVE_LOCK:
+            claude_runner._LIVE_PGIDS.add(pgid)
+        try:
+            n = claude_runner.kill_all()
+            self.assertGreaterEqual(n, 1)
+            p.wait(timeout=5)
+            self.assertIsNotNone(p.poll())                 # task is dead
+        finally:
+            with claude_runner._LIVE_LOCK:
+                claude_runner._LIVE_PGIDS.discard(pgid)
+            if p.poll() is None:
+                p.kill()
+
+
+class ScopeProxyTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = isolate(self)
+
+    def test_host_allowed_decision(self):
+        from fosc.scope_proxy import host_allowed
+        from fosc.scope import Scope
+        sc = Scope.from_target("http://127.0.0.1:3001")
+        egress = ["api.anthropic.com", ".amazonaws.com"]
+        self.assertTrue(host_allowed("127.0.0.1", sc, egress))            # in scope
+        self.assertTrue(host_allowed("api.anthropic.com", sc, egress))    # model egress
+        self.assertTrue(host_allowed("bedrock-runtime.us-east-1.amazonaws.com", sc, egress))
+        self.assertFalse(host_allowed("evil.com", sc, egress))            # out of scope
+        self.assertFalse(host_allowed("169.254.169.254", sc, egress))     # cloud metadata
+
+    def test_connect_out_of_scope_is_blocked(self):
+        import socket
+        from fosc.scope_proxy import ScopeProxy
+        from fosc.scope import Scope
+        from fosc.audit import AuditLog
+        log = AuditLog(self.tmp / "audit.jsonl")
+        px = ScopeProxy(Scope.from_target("http://allowed.example"), audit_log=log)
+        px.start()
+        try:
+            s = socket.create_connection(("127.0.0.1", px.port), timeout=5)
+            s.sendall(b"CONNECT evil.com:443 HTTP/1.1\r\nHost: evil.com\r\n\r\n")
+            resp = s.recv(200)
+            s.close()
+            self.assertIn(b"403", resp)
+            self.assertEqual(px.blocked, 1)
+            self.assertIn("scope_block", [e["kind"] for e in log.entries()])
+        finally:
+            px.stop()
+
+    def test_connect_in_scope_tunnels(self):
+        import socket
+        import threading as _t
+        from fosc.scope_proxy import ScopeProxy
+        from fosc.scope import Scope
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+
+        def echo():
+            c, _ = srv.accept()
+            c.sendall(b"ECHO:" + c.recv(100))
+            c.close()
+        _t.Thread(target=echo, daemon=True).start()
+        px = ScopeProxy(Scope.from_target(f"http://127.0.0.1:{port}"))
+        px.start()
+        try:
+            s = socket.create_connection(("127.0.0.1", px.port), timeout=5)
+            s.sendall(f"CONNECT 127.0.0.1:{port} HTTP/1.1\r\n\r\n".encode())
+            self.assertIn(b"200", s.recv(100))             # tunnel established
+            s.sendall(b"hello")
+            self.assertIn(b"ECHO:hello", s.recv(100))       # bytes flow through
+            s.close()
+        finally:
+            px.stop()
+            srv.close()
+
+
+class TelegramTests(unittest.TestCase):
+    def test_parse_callback_approve(self):
+        from fosc.telegram_bot import parse_update
+        i = parse_update({"update_id": 5, "callback_query": {
+            "id": "cq1", "data": "approve:abc123", "from": {"username": "joao"}}})
+        self.assertEqual(i["kind"], "approve")
+        self.assertEqual(i["id"], "abc123")
+        self.assertEqual(i["from"], "joao")
+        self.assertEqual(i["callback_id"], "cq1")
+
+    def test_parse_callback_deny_and_halt(self):
+        from fosc.telegram_bot import parse_update
+        self.assertEqual(parse_update({"callback_query": {"data": "deny:x", "from": {"first_name": "A"}}})["kind"], "deny")
+        self.assertEqual(parse_update({"message": {"text": "/halt now", "from": {"username": "op"}}})["kind"], "halt")
+
+    def test_parse_ignores_noise(self):
+        from fosc.telegram_bot import parse_update
+        self.assertIsNone(parse_update({"message": {"text": "oi tudo bem"}}))
+        self.assertIsNone(parse_update({"callback_query": {"data": "weird-no-colon"}}))
+
+    def test_send_telegram_not_configured(self):
+        from fosc import notify
+        ok, desc = notify.send_telegram("hi", cfg={})
+        self.assertFalse(ok)
+        self.assertEqual(desc, "telegram not configured")
+
+    def test_approval_message_has_buttons(self):
+        from fosc import notify
+        captured = {}
+        orig = notify.send_telegram
+        notify.send_telegram = lambda text, cfg=None, buttons=None: (captured.update(text=text, buttons=buttons), (True, None))[1]
+        try:
+            notify.notify_approval("tgt", "active-hunt", "ctx", "rid9")
+        finally:
+            notify.send_telegram = orig
+        self.assertIn("AUTORIZAÇÃO", captured["text"])
+        self.assertEqual(captured["buttons"][0][0][1], "approve:rid9")   # ✅ button
+        self.assertEqual(captured["buttons"][0][1][1], "deny:rid9")      # ❌ button
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,29 @@ from pathlib import Path
 
 from . import config, net
 
+# Registry of in-flight task process groups, so an emergency HALT can kill every
+# running `claude` task NOW instead of waiting for them to finish (challenge #6).
+_LIVE_PGIDS: set[int] = set()
+_LIVE_LOCK = threading.Lock()
+
+# Set by the engine when the scope proxy is on (G0): every task's HTTP(S) traffic
+# is then forced through it, so the agent cannot reach an out-of-scope host.
+PROXY_URL: str | None = None
+
+
+def kill_all() -> int:
+    """SIGKILL every in-flight task process group. Returns how many were signalled."""
+    with _LIVE_LOCK:
+        pgids = list(_LIVE_PGIDS)
+    n = 0
+    for pgid in pgids:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+            n += 1
+        except ProcessLookupError:
+            pass
+    return n
+
 
 def _short(s, n=140) -> str:
     s = " ".join(str(s).split())
@@ -53,8 +76,19 @@ def describe_event(ev: dict) -> list[str]:
 def run_claude(prompt: str, cwd: Path, timeout: int, stream_path: Path, *, model: str,
                system_prompt: str, schema: dict | None, on_activity=None,
                allow_tools: bool = True, effort: str | None = None,
-               budget: float | None = None) -> dict:
-    """Returns {"output": dict|None, "cost": float, "status": ok|timeout|error, "error": str|None, "turns": int}."""
+               budget: float | None = None, env_extra: dict | None = None) -> dict:
+    """Spawn one headless `claude` task. Low-level primitive: it runs exactly the
+    model/provider it is told to. Model selection, provider choice and failover
+    live one layer up in `fosc/models.py` — callers ask for a ROLE there, not a
+    model here, so swapping models never touches the application.
+
+    `env_extra` is merged into the child environment (the model router uses it to
+    flip the `claude` CLI between the Anthropic API and Amazon Bedrock per attempt).
+
+    Returns {"output": dict|None, "cost": float,
+             "status": ok|timeout|error|offline|refused, "error": str|None, "turns": int}.
+    A status of error/timeout/refused is failover-worthy; offline is not (another
+    model will not help when the network is down)."""
     cwd.mkdir(parents=True, exist_ok=True)
     stream_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -76,14 +110,27 @@ def run_claude(prompt: str, cwd: Path, timeout: int, stream_path: Path, *, model
     cmd.append(prompt)
 
     result = {"output": None, "cost": 0.0, "status": "error", "error": None, "turns": 0}
+    child_env = os.environ.copy()
+    if PROXY_URL:  # G0: force the agent's traffic through the scope-enforcing proxy
+        child_env.update({"HTTP_PROXY": PROXY_URL, "HTTPS_PROXY": PROXY_URL,
+                          "http_proxy": PROXY_URL, "https_proxy": PROXY_URL})
+    if env_extra:
+        child_env.update({k: str(v) for k, v in env_extra.items()})
     try:
         proc = subprocess.Popen(
             cmd, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, start_new_session=True, bufsize=1,
+            text=True, start_new_session=True, bufsize=1, env=child_env,
         )
     except FileNotFoundError:
         result["error"] = "claude CLI not found on PATH"
         return result
+
+    try:
+        pgid = os.getpgid(proc.pid)
+    except ProcessLookupError:
+        pgid = proc.pid
+    with _LIVE_LOCK:
+        _LIVE_PGIDS.add(pgid)
 
     timed_out = threading.Event()
     offline_hit = threading.Event()
@@ -138,6 +185,8 @@ def run_claude(prompt: str, cwd: Path, timeout: int, stream_path: Path, *, model
     finally:
         timer.cancel()
         watchdog.cancel()
+        with _LIVE_LOCK:
+            _LIVE_PGIDS.discard(pgid)
         if proc.stdout:
             proc.stdout.close()
 
@@ -153,6 +202,12 @@ def run_claude(prompt: str, cwd: Path, timeout: int, stream_path: Path, *, model
 
     result["cost"] = float(final.get("total_cost_usd") or 0.0)
     result["turns"] = int(final.get("num_turns") or 0)
+    # Refusal: the model declined the task (policy stop). Distinct from a crash so
+    # the router can fail over to another model instead of recording an empty find.
+    subtype = str(final.get("subtype") or "")
+    if subtype == "refusal" or final.get("stop_reason") == "refusal":
+        result.update(status="refused", error=_short(final.get("result") or "model refused the task", 300))
+        return result
     if final.get("is_error"):
         result["error"] = _short(final.get("result") or final.get("subtype") or "error", 300)
         return result

@@ -1,6 +1,9 @@
 import argparse
 import json
+import os
+import signal
 import sys
+import time
 
 from . import config
 from .banner import print_banner
@@ -103,6 +106,64 @@ def do_resume(args):
     print(f"resumed {args.target}.")
 
 
+def do_halt(args):
+    """Emergency stop (challenge #6): kill in-flight tasks NOW, preserve evidence."""
+    state = RunState(args.target)
+    state.halt_path.write_text("HALT\n")
+    state.pause_path.unlink(missing_ok=True)
+    note = ""
+    pid = state.read_meta().get("pid")
+    if pid:
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)  # backstop for the hunt process itself
+            note = f" (sinal enviado ao processo {pid})"
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    print(f"HALT de emergência para {args.target}: tarefas em voo encerradas AGORA; "
+          f"evidências, estado e trilha de auditoria preservados{note}.")
+
+
+def do_telegram_test(args):
+    from .notify import send_test, configured
+    if not configured():
+        print("telegram não configurado. Adicione telegram_token e telegram_chat_id em "
+              f"{config.CONFIG_PATH} (chmod 600).")
+        return
+    ok, desc = send_test()
+    print("telegram: mensagem de teste enviada ✓" if ok else f"telegram falhou: {desc}")
+
+
+def do_audit(args):
+    """Print and cryptographically verify the chain of custody (challenge #8)."""
+    from .audit import AuditLog
+    log = AuditLog(RunState(args.target).audit_path)
+    entries = log.entries()
+    if not entries:
+        print(f"sem trilha de auditoria para {args.target} ainda.")
+        return
+    ok, _, msg = log.verify()
+    seal = "ÍNTEGRA ✓" if ok else "VIOLADA ✗"
+    print(f"trilha de auditoria · {len(entries)} registro(s) · integridade: {seal} — {msg}\n")
+    for e in entries:
+        ts = time.strftime("%H:%M:%S", time.localtime(e.get("ts", 0)))
+        kind, d, actor = e.get("kind", "?"), e.get("data") or {}, e.get("actor")
+        if kind == "plan":
+            extra = f"hipótese: {d.get('hypothesis', '')}"
+        elif kind == "finding":
+            extra = f"[{d.get('severity')}] {d.get('vuln_class')} {d.get('url', '')} · {','.join(d.get('mitre') or [])}"
+        elif kind == "approval":
+            extra = f"{d.get('action')} approved={d.get('approved')} por {actor} (id {d.get('id')})"
+        elif kind == "scope_block":
+            extra = f"BLOQUEADO fora de escopo: {d.get('host')}"
+        elif kind == "task":
+            extra = f"{d.get('verdict')} · {d.get('model')} · {len(d.get('commands') or [])} cmd(s)"
+        elif kind == "halt":
+            extra = f"{d.get('killed')} tarefa(s) encerrada(s)"
+        else:
+            extra = str(d.get("scope") or d.get("status") or d.get("url") or "")
+        print(f"  {ts}  {kind:13} {extra}")
+
+
 def do_view(args):
     run_viewer(args.port, preselect_target=args.target)
 
@@ -130,7 +191,7 @@ def build_parser() -> argparse.ArgumentParser:
     action.add_argument("-h", "--hunt", dest="action", action="store_const", const="hunt",
                          help="hunter mode: recon -> rank -> hunt -> validate -> PoC, loops over the surface")
     action.add_argument("-c", "--chat", dest="action", action="store_const", const="chat",
-                         help="conversar com o FOSC AGENT (assistente de pentest); -a opcional dá contexto do alvo")
+                         help="conversar com o BB-Sentinela (assistente de pentest); -a opcional dá contexto do alvo")
     action.add_argument("-w", "--watch", dest="action", action="store_const", const="watch",
                          help="live terminal dashboard for a running (or finished) hunt")
     action.add_argument("-v", "--view", dest="action", action="store_const", const="view",
@@ -151,6 +212,12 @@ def build_parser() -> argparse.ArgumentParser:
                          help="listar pedidos de autorização pendentes (human-in-the-loop)")
     action.add_argument("--approve", dest="action", action="store_const", const="approve",
                          help="aprovar um pedido de autorização (use com --id)")
+    action.add_argument("--halt", dest="action", action="store_const", const="halt",
+                        help="parada de EMERGÊNCIA: encerra tarefas em voo AGORA, preserva evidências")
+    action.add_argument("--audit", dest="action", action="store_const", const="audit",
+                        help="imprime e verifica a trilha de auditoria (cadeia de custódia encadeada por hash)")
+    action.add_argument("--telegram-test", dest="action", action="store_const", const="telegram_test",
+                        help="envia uma mensagem de teste pro Telegram (valida token/chat)")
     action.add_argument("--deny", dest="action", action="store_const", const="deny",
                          help="negar um pedido de autorização (use com --id)")
 
@@ -282,13 +349,16 @@ DISPATCH = {
     "stop": do_stop,
     "pause": do_pause,
     "resume": do_resume,
+    "halt": do_halt,
+    "audit": do_audit,
+    "telegram_test": do_telegram_test,
     "shell": do_shell,
     "approvals": do_approvals,
     "approve": do_approve,
     "deny": do_deny,
 }
 
-_NO_TARGET = ("view", "chat", "shell", "approvals", "approve", "deny")
+_NO_TARGET = ("view", "chat", "shell", "approvals", "approve", "deny", "telegram_test")
 
 
 def main():

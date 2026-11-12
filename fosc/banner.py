@@ -1,23 +1,16 @@
-"""Startup banner: red gradient FOSC AGENT logo + tagline + live status."""
+"""Startup banner: red-gradient BB-SENTINELA wordmark + governance tagline + status."""
 import sys
 
 from . import config
 
-# "FOSC" over "AGENT", ANSI Shadow font.
+# "SENTINELA", ANSI Shadow font.
 LOGO = [
-    "███████╗ ██████╗ ███████╗ ██████╗",
-    "██╔════╝██╔═══██╗██╔════╝██╔════╝",
-    "█████╗  ██║   ██║███████╗██║     ",
-    "██╔══╝  ██║   ██║╚════██║██║     ",
-    "██║     ╚██████╔╝███████║╚██████╗",
-    "╚═╝      ╚═════╝ ╚══════╝ ╚═════╝",
-    "",
-    " █████╗  ██████╗ ███████╗███╗   ██╗████████╗",
-    "██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝",
-    "███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ",
-    "██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ",
-    "██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ",
-    "╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ",
+    "███████╗███████╗███╗   ██╗████████╗██╗███╗   ██╗███████╗██╗      █████╗ ",
+    "██╔════╝██╔════╝████╗  ██║╚══██╔══╝██║████╗  ██║██╔════╝██║     ██╔══██╗",
+    "███████╗█████╗  ██╔██╗ ██║   ██║   ██║██╔██╗ ██║█████╗  ██║     ███████║",
+    "╚════██║██╔══╝  ██║╚██╗██║   ██║   ██║██║╚██╗██║██╔══╝  ██║     ██╔══██║",
+    "███████║███████╗██║ ╚████║   ██║   ██║██║ ╚████║███████╗███████╗██║  ██║",
+    "╚══════╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝╚═╝  ╚═╝",
 ]
 # bright red at the top fading to deep crimson, interpolated over all rows
 _TOP = (255, 92, 92)
@@ -42,7 +35,7 @@ def _status_line() -> str:
         runs = list_runs()
         live = sum(1 for r in runs if r.status() in ("running", "paused", "sleeping", "recon"))
         confirmed = sum(len(r.confirmed()) for r in runs)
-        return f"{live} hunt(s) running · {confirmed} confirmed finding(s) · {len(runs)} target(s)"
+        return f"{live} campanha(s) ativa(s) · {confirmed} achado(s) confirmado(s) · {len(runs)} alvo(s)"
     except Exception:
         return ""
 
@@ -53,12 +46,12 @@ def print_banner():
     print()
     n = len(LOGO)
     for i, line in enumerate(LOGO):
-        if not line:
-            print()
-            continue
         print("  " + _rgb(*_grad(i, n)) + line + RESET)
-    print(f"  {_rgb(255, 64, 64)}Ferramenta Ofensiva de Segurança Cibernética{RESET}")
-    print(f"  {_rgb(214, 24, 40)}recon → hunt → review → PoC{RESET}  {DIM}v{config.VERSION} · never stops on a finding{RESET}")
+    print()
+    print(f"  {_rgb(255, 64, 64)}BB-SENTINELA{RESET} {DIM}·{RESET} "
+          f"{_rgb(214, 24, 40)}agente autônomo de pentest com governança{RESET}")
+    print(f"  {DIM}escopo estrito · human-in-the-loop · trilha auditável · MITRE ATT&CK"
+          f"  ·  v{config.VERSION}{RESET}")
     status = _status_line()
     if status:
         print(f"  {DIM}{status}{RESET}")

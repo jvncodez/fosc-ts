@@ -51,9 +51,59 @@ DNS_WORDLISTS = [                   # first one that exists on disk is used
 ]
 
 CLAUDE_BIN = "claude"
-HUNT_MODEL = "sonnet"
+HUNT_MODEL = "sonnet"      # kept as the primary of the hunt ladder (back-compat)
 VERIFY_MODEL = "opus"
 CONSOLIDATE_MODEL = "sonnet"
+
+# ---------------------------------------------------------------------------
+# Model layer (fosc/models.py). The application asks for a ROLE, never a model;
+# the router picks the provider and FAILS OVER to the next model on error /
+# refusal / slowness. Swapping, reordering or adding a model (e.g. moving to
+# Amazon Bedrock on AWS) is configuration here — never an application change.
+# ---------------------------------------------------------------------------
+# Global provider for bare aliases. Per-ladder entries may override it with an
+# explicit "provider:model-id". On AWS: SENTINELA_PROVIDER=bedrock.
+MODEL_PROVIDER = os.environ.get("SENTINELA_PROVIDER", "anthropic").lower()  # anthropic | bedrock
+
+# Alias -> concrete model id, per provider. Bedrock ids are inference-profile ids
+# and vary by account/region, so every one is env-overridable (set on AWS).
+ANTHROPIC_MODEL_IDS = {"sonnet": "sonnet", "opus": "opus", "haiku": "haiku"}
+BEDROCK_MODEL_IDS = {
+    "sonnet": os.environ.get("BEDROCK_SONNET", "us.anthropic.claude-sonnet-4-5-20250929-v1:0"),
+    "opus":   os.environ.get("BEDROCK_OPUS",   "us.anthropic.claude-opus-4-1-20250805-v1:0"),
+    "haiku":  os.environ.get("BEDROCK_HAIKU",  "us.anthropic.claude-haiku-4-5-20251001-v1:0"),
+}
+
+# Role -> ordered fallback ladder. Entry is an alias (resolved via the provider
+# above) or an explicit "provider:model-id" to pin/cross providers. The first
+# entry of each ladder reproduces the legacy single-model behaviour.
+MODEL_LADDERS = {
+    "hunt":        ["sonnet", "haiku"],
+    "verify":      ["opus", "sonnet"],
+    "consolidate": ["sonnet", "haiku"],
+    "privesc":     ["sonnet", "opus"],
+}
+
+MODEL_MAX_ATTEMPTS = 3        # never try more than this many models for one call
+# A slow (not offline) model is abandoned at this fraction of the task's hard
+# timeout so the fallback model still has time to finish.
+MODEL_ATTEMPT_FRACTION = 0.6
+
+# ---------------------------------------------------------------------------
+# Network-level scope enforcement (G0, fosc/scope_proxy.py). When on, the agent's
+# HTTP(S) traffic is routed through an egress proxy that allows ONLY in-scope hosts
+# plus the model-API egress below — so leaving scope is impossible on the wire, not
+# just forbidden in a prompt. Opt-in because the egress allowlist is environment
+# specific (Anthropic API vs Bedrock).
+SCOPE_PROXY = os.environ.get("SENTINELA_SCOPE_PROXY", "").lower() in ("1", "true", "yes")
+# Hosts the model/agent layer itself must reach (NEVER the target). A "." prefix is
+# a suffix match. ".anthropic.com" covers api + mcp-proxy + statsig; ".amazonaws.com"
+# covers Bedrock runtime/STS on AWS. Third-party telemetry (e.g. datadog) is left
+# OUT on purpose — it is harmless to block and keeps egress minimal.
+PROXY_EGRESS_HOSTS = [
+    ".anthropic.com",
+    ".amazonaws.com",
+]
 
 # Depth controls. FOSC hunts deep and persistent by default; budget caps keep a
 # single endpoint from running away. budget 0 = uncapped.
@@ -80,7 +130,7 @@ JS_MINING = True
 # Authorization Engine (human-in-the-loop). mode: ask (default, require human
 # approval for sensitive actions) | yolo (auto-approve, lab only) | paranoid
 # (approve everything). AUTHZ_HUNT_GATE also gates the start of active hunting.
-AUTHZ_MODE = "ask"
+AUTHZ_MODE = os.environ.get("SENTINELA_AUTHZ", "ask").lower()  # ask | yolo | paranoid
 AUTHZ_HUNT_GATE = True      # ask once per run before active testing begins
 AUTHZ_TIMEOUT = 1800        # headless: seconds to wait for a human decision
 AUTHZ_POLL = 2              # headless: seconds between checks of the approvals log

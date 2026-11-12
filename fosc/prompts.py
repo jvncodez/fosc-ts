@@ -41,6 +41,7 @@ VERIFY_SCHEMA = {
         "severity": {"type": ["string", "null"], "enum": config.SEVERITIES + [None]},
         "cvss": {"type": ["number", "null"]},
         "vuln_class": {"type": ["string", "null"]},
+        "confidence": {"type": ["string", "null"], "enum": ["high", "medium", "low", None]},
         "lesson": {"type": ["string", "null"]},
     },
     "required": ["survives", "reason"],

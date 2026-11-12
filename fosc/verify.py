@@ -11,8 +11,7 @@ sandboxed session.
 """
 from pathlib import Path
 
-from . import config
-from .claude_runner import run_claude
+from . import config, models
 from .prompts import VERIFY_SCHEMA, VERIFY_SYSTEM, build_verify_prompt
 
 
@@ -39,12 +38,12 @@ def _read_poc(task_dir: Path, poc_path: str | None) -> str:
 def verify_finding(scope_note: str, item: dict, finding: dict, task_dir: Path, on_activity=None,
                    timeout: int = config.DEFAULT_VERIFY_TIMEOUT) -> dict:
     poc_text = _read_poc(task_dir, finding.get("poc_path"))
-    run = run_claude(
+    run = models.run(
+        "verify",
         build_verify_prompt(scope_note, item, finding, poc_text),
         cwd=task_dir / "verify",
         timeout=timeout,
         stream_path=task_dir / "verify.stream.jsonl",
-        model=config.VERIFY_MODEL,
         system_prompt=VERIFY_SYSTEM,
         schema=VERIFY_SCHEMA,
         on_activity=(lambda m: on_activity(f"[review] {m}")) if on_activity else None,

@@ -146,11 +146,16 @@ class Out:
         g = Table.grid(padding=(0, 3))
         g.add_row(Text("target", style="grey50"), Text(target, style="bold"),
                   Text("mode", style="grey50"), Text("continuous" if continuous else "single pass"))
+        from . import models
+        ms = models.summary()
+        hunt_ladder = " → ".join(ms["ladders"].get("hunt", []))
         g.add_row(Text("workers", style="grey50"), Text(str(workers)),
-                  Text("models", style="grey50"), Text(f"{config.HUNT_MODEL} hunt / {config.VERIFY_MODEL} review"))
+                  Text("provider", style="grey50"), Text(ms["provider"]))
+        g.add_row(Text("", style="grey50"), Text(""),
+                  Text("hunt", style="grey50"), Text(hunt_ladder, style="grey62"))
         g.add_row(Text("state", style="grey50"), Text(str(run_dir), style="grey62"), Text(""), Text(""))
         with self._region():
-            self.c.print(Panel(g, title=f"[bold {ACCENT}]FOSC hunt[/]", border_style=ACCENT, expand=False))
+            self.c.print(Panel(g, title=f"[bold {ACCENT}]BB-Sentinela[/]", border_style=ACCENT, expand=False))
 
     def info(self, msg):
         if not self.rich:

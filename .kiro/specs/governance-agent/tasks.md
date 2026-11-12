@@ -21,16 +21,39 @@ Legenda: [x] feito · [ ] a fazer. Cada tarefa referencia o requisito (Rn).
         `fosc --approve/--deny --id <id>` e `fosc --approvals`; interativo via prompt.
   - Modos: `ask` (padrão), `yolo` (lab), `paranoid`. 6 testes.
 
-## A fazer
-- [ ] 9. Audit & Evidence Manager (R4)
-  - [ ] 9.1 Trilha append-only (req, decisão de escopo, aprovação, evidência).
-  - [ ] 9.2 Encadeamento por hash (à prova de adulteração).
-  - [ ] 9.3 Minimização de dados pessoais no PoC (LGPD).
-- [ ] 10. Enforcement duro de escopo via proxy allowlist (CONNECT/Host). (R1)
-- [ ] 11. Validação end-to-end no OWASP Juice Shop (SPA) + checagem anti-fuga. (R1,R2)
-- [ ] 12. Integração AWS/Kiro: `SENTINELA_HOME` em volume persistente, segredos
-      fora do repo, execução headless com aprovação remota.
+## Feito (cont.)
+- [x] M. Camada de modelo com failover (`fosc/models.py`) — papel→ladder, provedor
+      Anthropic/Bedrock por env (`SENTINELA_PROVIDER`/`BEDROCK_*`), failover em
+      falha/recusa/lentidão, custo somado, stream de cada tentativa preservado.
+      App pede papel (`models.run`), nunca modelo → trocar modelo é config, não
+      código. 6 testes (48 no total). Requisito AWS/Bedrock do BB.
+
+- [x] 9. Audit & Evidence Manager (`fosc/audit.py`) (R4)
+  - [x] 9.1 Trilha append-only única (`audit.jsonl`): run_start, scope, plan,
+        approval, command/task, finding, halt, run_end. CLI `fosc --audit`.
+  - [x] 9.2 Encadeamento por hash SHA-256 (prev+payload); `verify()` acha o 1º elo
+        quebrado (à prova de adulteração). Teste de tamper.
+  - [x] 9.3 Minimização LGPD (`audit.redact`): mascara email/CPF/cartão; `minimize=`
+        aplicado em task/finding.
+- [x] 3. Plano do agente antes de cada etapa (`fosc/plan.py`): hipótese/ação/
+      resultado esperado/condição de parada, gravado na trilha ANTES de agir. (#3)
+- [x] 6. Interrupção de emergência (`fosc --halt`): registro de pgids vivos +
+      `kill_all` (SIGKILL in-flight AGORA), arquivo HALT, evidências preservadas. (#6)
+- [x] 10. Enforcement DURO de escopo via proxy (`fosc/scope_proxy.py`): forward
+      proxy CONNECT+HTTP que só deixa sair hosts em escopo + egress da API; fuga
+      bloqueada na REDE (403 + `scope_block` na trilha). Opt-in `SENTINELA_SCOPE_PROXY`.
+      Traffic do agente forçado via `claude_runner.PROXY_URL`. (R1) (G0)
+- [x] 2b. Tier "proibidas" no Authorization Engine (`_PROHIBITED`): recusa
+      determinística, nenhum modo/aprovação habilita. (#2)
+- [x] 5b. Campo `confidence` no achado (verify) + no report. (#5)
+- [x] 7. Relatório da campanha (`report.write_executive_summary`): resumo executivo
+      + índice técnico + integridade da trilha, determinístico. (#7)
+- [~] 11. Validação end-to-end no Juice Shop: SPA + anti-fuga feitos; hunt com proxy
+      em validação (smoke test com `SENTINELA_SCOPE_PROXY=1`).
+- [~] 12. AWS/Kiro: envs prontas (`SENTINELA_HOME`/`_PROVIDER`/`_AUTHZ`/`_SCOPE_PROXY`,
+      `BEDROCK_*`); falta volume persistente + aprovação remota.
 - [ ] 13. Rebrand (banner/nome; o pacote interno ainda é `fosc`).
+- [ ] T. Melhorar o bot do Telegram (`fosc/notify.py`) — a fazer.
 
 ## Como validar
 - Offline: `python -m pytest -q`.

@@ -175,7 +175,7 @@ def set_config(p: dict) -> dict:
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
-    server_version = "FOSC-Viewer"
+    server_version = "Sentinela-Viewer"
     port = 5555
 
     def log_message(self, fmt, *args):
@@ -259,7 +259,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if path == "/api/config":
                 return self._json(set_config(p))
             if path == "/api/telegram/test":
-                ok, err = send_telegram("✅ <b>FOSC</b>: notificações do Telegram funcionando.")
+                ok, err = send_telegram("✅ <b>BB-Sentinela</b>: notificações do Telegram funcionando.")
                 return self._json({"ok": ok, "error": err})
             if path == "/api/knowledge/playbook":
                 knowledge.write_playbook(str(p.get("text", ""))[:20000])

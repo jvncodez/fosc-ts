@@ -9,6 +9,20 @@ inclusion: always
   só quando necessário (ver `requirements.txt`).
 - O agente de IA é o **`claude` CLI** (shell-out headless: `claude -p
   --output-format stream-json ...`). Não há SDK; a orquestração é em Python.
+- **Camada de modelo (`fosc/models.py`) — isolamento obrigatório.** A aplicação
+  NUNCA nomeia um modelo ou provedor: pede um **papel** (`models.run("hunt"|"verify"|
+  "consolidate"|"privesc", ...)`). O router resolve o papel para uma **ladder** de
+  modelos candidatos (configuração em `config.MODEL_LADDERS`, sobrescrevível por
+  `config.json`/env), escolhe o **provedor** por tentativa (**Anthropic API** ou
+  **Amazon Bedrock**, via env `CLAUDE_CODE_USE_BEDROCK` que o CLI já honra) e faz
+  **failover** automático se um modelo **falhar, recusar (`status=refused`) ou ficar
+  lento** (timeout suave = `MODEL_ATTEMPT_FRACTION` do timeout da tarefa). `offline`
+  NÃO faz failover (outro modelo não resolve rede fora). Trocar/adicionar modelo é
+  config, não código. **No AWS:** `SENTINELA_PROVIDER=bedrock` + `BEDROCK_SONNET/
+  _OPUS/_HAIKU` (inference-profile ids) + credenciais AWS no ambiente.
+- `claude_runner.run_claude` é o primitivo de spawn (roda exatamente o modelo que
+  recebe); seleção/failover ficam em `models.py`, uma camada acima. Não chamar
+  `run_claude` direto da aplicação — usar `models.run(role, ...)`.
 - Ferramentas externas de pentest (subfinder, httpx, katana, nuclei, ffuf, sqlmap,
   dnsx, feroxbuster) são opcionais e detectadas em runtime (`toolrunner.have`).
 

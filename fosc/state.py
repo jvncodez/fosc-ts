@@ -109,6 +109,8 @@ class RunState:
         self.privesc_path = self.dir / "privesc.json"
         self.claims_path = self.dir / "claims.json"
         self.approvals_path = self.dir / "approvals.jsonl"  # human-in-the-loop custody log
+        self.audit_path = self.dir / "audit.jsonl"          # tamper-evident chain of custody
+        self.halt_path = self.dir / "HALT"                  # emergency stop (kills in-flight)
         self._lock = threading.Lock()
         if fresh:
             for p in (self.done_path, self.results_path, self.confirmed_path, self.active_path,
@@ -250,7 +252,11 @@ class RunState:
 
     # -- control ---------------------------------------------------------------
     def should_stop(self) -> bool:
-        return self.stop_path.exists()
+        return self.stop_path.exists() or self.halt_path.exists()
+
+    def should_halt(self) -> bool:
+        """Emergency: stop everything NOW, including in-flight tasks."""
+        return self.halt_path.exists()
 
     def is_paused(self) -> bool:
         return self.pause_path.exists()

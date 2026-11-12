@@ -8,11 +8,11 @@ while letting in-flight tasks finish.
 import json
 import os
 import sys
+import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from . import config, knowledge, net
-from .claude_runner import run_claude
+from . import audit, claude_runner, config, knowledge, models, net, plan
 from .notify import notify_finding
 from .privesc import attempt_privesc
 from .prompts import (CONSOLIDATE_SCHEMA, CONSOLIDATE_SYSTEM, HUNT_SCHEMA, HUNT_SYSTEM,
@@ -20,12 +20,15 @@ from .prompts import (CONSOLIDATE_SCHEMA, CONSOLIDATE_SYSTEM, HUNT_SCHEMA, HUNT_
 from .rank import rank, suggest_classes
 from .recon import load_or_build, item_id, route_pattern, target_host
 from .scope import Scope
-from .authz import ApprovalStore, require
+from .scope_proxy import ScopeProxy
+from .authz import ApprovalStore, require, operator
 from . import mitre
-from .report import write_report
+from .report import write_report, write_executive_summary
 from .state import RunState
 from .ui import Out
 from .verify import verify_finding
+from . import notify
+from .telegram_bot import TelegramBot
 
 
 def _privesc_approved(state, out, target, act) -> bool:
@@ -47,7 +50,8 @@ def _js_for(item: dict, surface: dict) -> list[str]:
 
 
 def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict,
-             surface: dict, stats: dict, timeout: int, extra_headers: list[str] | None = None) -> dict:
+             surface: dict, stats: dict, timeout: int, extra_headers: list[str] | None = None,
+             audit_log=None, scope_label: str = "") -> dict:
     classes = suggest_classes(item, stats)
     lessons = knowledge.relevant(item, classes)
     learned = knowledge.format_for_prompt(lessons, target)
@@ -57,14 +61,25 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
                    "reinstalar):\n" + arsenal).strip()
     prompt = build_hunt_prompt(target, scope_note, item, classes, learned, _js_for(item, surface), extra_headers)
 
+    commands: list[str] = []
+
     def act(msg):
         state.activity(item, msg)
         out.activity(msg)  # feed the live themed status line
+        if msg.startswith("$ "):
+            commands.append(msg[2:])  # chain of custody: every command the agent ran
+
+    # #3: register the plan (hypothesis / action / expected result / stop condition)
+    # BEFORE acting — intent-before-action, written to the tamper-evident ledger.
+    if audit_log:
+        audit_log.record("plan", actor=operator(),
+                         **plan.hunt_plan(item, classes, budget=config.DEFAULT_TASK_BUDGET_USD,
+                                          timeout=timeout, scope_label=scope_label or scope_note))
 
     state.set_active(item, "hunting")
     try:
-        run = run_claude(prompt, cwd=state.task_dir(item), timeout=timeout,
-                         stream_path=state.stream_path(item), model=config.HUNT_MODEL,
+        run = models.run("hunt", prompt, cwd=state.task_dir(item), timeout=timeout,
+                         stream_path=state.stream_path(item),
                          system_prompt=HUNT_SYSTEM, schema=HUNT_SCHEMA, on_activity=act,
                          effort=config.HUNT_EFFORT, budget=config.DEFAULT_TASK_BUDGET_USD)
         state.add_cost(run["cost"])
@@ -72,6 +87,10 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
         if run["status"] != "ok":
             verdict = {"timeout": "timeout", "offline": "offline"}.get(run["status"], "error")
             knowledge.record_event(target, item, verdict, None, item.get("tech") or [])
+            if audit_log:
+                audit_log.record("task", actor=operator(), minimize=True, url=item.get("url"),
+                                 model=run.get("model"), status=run["status"], verdict=verdict,
+                                 cost=cost, commands=commands[:50])
             return {"verdict": verdict, "summary": run["error"] or verdict, "cost": cost,
                     "lessons_used": len(lessons)}
 
@@ -115,7 +134,8 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
                     finding = {"key": key, "url": endpoint_url, "pattern": vpat,
                                "vuln_class": review.get("vuln_class") or cls,
                                "severity": review.get("severity") or f.get("severity"),
-                               "cvss": review.get("cvss"), "title": f.get("title"),
+                               "cvss": review.get("cvss"), "confidence": review.get("confidence") or "medium",
+                               "title": f.get("title"),
                                "summary": f.get("summary"), "impact": f.get("impact"),
                                "steps": f.get("steps") or [], "repro_curl": f.get("repro_curl"),
                                "evidence_marker": f.get("evidence_marker"),
@@ -124,6 +144,13 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
                                "mitre": mitre.techniques(review.get("vuln_class") or cls),
                                "review": review.get("reason"), "item_id": item_id(item)}
                     finding = state.add_confirmed(finding)
+                    if audit_log:
+                        audit_log.record("finding", actor=operator(), minimize=True,
+                                         id=finding["id"], url=endpoint_url,
+                                         vuln_class=finding["vuln_class"], severity=finding["severity"],
+                                         cvss=finding.get("cvss"),
+                                         mitre=[t.get("id") for t in finding.get("mitre") or []],
+                                         evidence=finding.get("evidence_marker"))
                     finding["report_path"] = write_report(state.dir, finding["id"], target, item, f,
                                                           review, state.task_dir(item))
                     # rewrite the last line with the report path (small file, append-only otherwise)
@@ -163,6 +190,10 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
                     knowledge.add_lesson("fp", review["lesson"], target, item, cls, tech)
 
         knowledge.record_event(target, item, res["verdict"], res.get("vuln_class") or cls, tech)
+        if audit_log:
+            audit_log.record("task", actor=operator(), minimize=True, url=item.get("url"),
+                             model=run.get("model"), status=run["status"], verdict=res["verdict"],
+                             cost=res.get("cost"), commands=commands[:50])
         return res
     finally:
         state.unset_active(item)
@@ -182,10 +213,10 @@ def consolidate(state: RunState, out: Out):
     if len(pending) < 5:
         return
     out.info(f"consolidating {len(pending)} new lesson(s) into the playbook")
-    run = run_claude(build_consolidate_prompt(knowledge.read_playbook(), pending),
+    run = models.run("consolidate", build_consolidate_prompt(knowledge.read_playbook(), pending),
                      cwd=config.KNOWLEDGE_ROOT / "work", timeout=300,
                      stream_path=config.KNOWLEDGE_ROOT / "work" / "consolidate.stream.jsonl",
-                     model=config.CONSOLIDATE_MODEL, system_prompt=CONSOLIDATE_SYSTEM,
+                     system_prompt=CONSOLIDATE_SYSTEM,
                      schema=CONSOLIDATE_SCHEMA, allow_tools=False)
     state.add_cost(run["cost"])
     if run["status"] == "ok" and run["output"].get("playbook_markdown"):
@@ -229,18 +260,62 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
                      cost_usd=prev_cost, version=config.VERSION, auth=bool(extra_headers))
     out.header(target, state.dir, workers, continuous)
     out.info(f"escopo: {scope.label()}")
+    # Audit & Evidence Manager: tamper-evident chain of custody for the whole run.
+    log = audit.AuditLog(state.audit_path)
+    log.record("run_start", actor=operator(), target=target, scope=scope.label(),
+               hosts=sorted(scope.hosts), allow_subdomains=scope.allow_subdomains,
+               workers=workers, continuous=continuous, version=config.VERSION)
     if net.offline():
         out.warn("sem conexão com a internet — o FOSC precisa da rede para o recon e para a "
                  "API do Claude. Reconecte e rode de novo.")
         state.write_meta(status="offline", finished_at=time.time())
+        notify.notify_event("offline", target)
         return
     out.start_live()  # Claude-Code-style themed "thinking" line (TTY only)
     state.activity(None, f"hunt started (workers={workers}, continuous={continuous})", kind="system")
 
+    # G0: network-level scope enforcement. Every task's HTTP(S) egress is forced
+    # through a proxy that only lets in-scope hosts (+ model API) out.
+    proxy = None
+    if config.SCOPE_PROXY:
+        proxy = ScopeProxy(scope, audit_log=log,
+                           on_block=lambda h: state.activity(None, f"escopo (proxy): BLOQUEADO {h}", kind="system"))
+        proxy.start()
+        claude_runner.PROXY_URL = proxy.url
+        log.record("proxy_start", url=proxy.url, egress=config.PROXY_EGRESS_HOSTS)
+        out.info(f"proxy de escopo ativo ({proxy.url}) — fuga de escopo bloqueada na rede")
+
+    # #6 emergency stop: a background watcher turns a HALT file into an immediate
+    # SIGKILL of every in-flight task. Evidence and state on disk are preserved.
+    halted = threading.Event()
+
+    def _halt_watch():
+        while not halted.wait(1.0):
+            if state.should_halt():
+                n = claude_runner.kill_all()
+                log.record("halt", actor=operator(), killed=n)
+                state.activity(None, f"HALT — {n} tarefa(s) em voo encerrada(s); "
+                               f"evidências e estado preservados", kind="system")
+                halted.set()
+                return
+    threading.Thread(target=_halt_watch, daemon=True).start()
+
+    # Telegram remote control: approve/deny the gate and /halt from the phone.
+    approvals = ApprovalStore(state.approvals_path)
+    bot = TelegramBot(
+        on_decision=lambda rid, ok, who: approvals.decide(rid, ok, who, "via telegram"),
+        on_halt=lambda who: state.halt_path.write_text(f"HALT via telegram ({who})\n"),
+        on_status=lambda who: (f"📊 {target} · {state.status()} · "
+                               f"{len(state.confirmed())} confirmado(s) · "
+                               f"US$ {state.read_meta().get('cost_usd', 0):.2f}"),
+    )
+    if bot.start():
+        out.info("telegram: controle remoto ativo (aprovar/negar/halt pelo chat)")
+    notify.notify_event("started", target, f"escopo {scope.label()} · workers={workers}")
+
     round_no = 0
     final_status = "finished"
     hunt_authorized = False
-    approvals = ApprovalStore(state.approvals_path)
     try:
         while not state.should_stop():
             round_no += 1
@@ -274,8 +349,11 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
                 out.stop_live()
                 dec = require(approvals, "active-hunt", scope.label(),
                               f"iniciar teste ATIVO de {len(todo)} endpoint(s) no escopo autorizado",
-                              on_notice=lambda m: (state.activity(None, m, kind="system"), out.warn(m)))
+                              on_notice=lambda m: (state.activity(None, m, kind="system"), out.warn(m)),
+                              on_pending=lambda rid, a, t, c: notify.notify_approval(t, a, c, rid))
                 out.start_live()
+                log.record("approval", actor=dec.approver or operator(), action="active-hunt",
+                           id=dec.id, approved=dec.approved, status=dec.status, scope=scope.label())
                 if not dec.approved:
                     out.warn(f"teste ativo NÃO autorizado ({dec.status}) — encerrando sem testar nada.")
                     state.activity(None, f"autorização de teste ativo negada/expirada ({dec.status})", kind="system")
@@ -300,7 +378,8 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
                         item = queue.pop(0)
                         state.activity(item, "task started", kind="system")
                         running[ex.submit(hunt_one, state, out, target, scope_note, item,
-                                          surface, stats, timeout, extra_headers)] = item
+                                          surface, stats, timeout, extra_headers,
+                                          log, scope.label())] = item
                     out.set_running(len(running))
                     if stop and not running:
                         break
@@ -342,8 +421,30 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
         final_status = "stopped"
         out.warn("interrupted")
     finally:
+        halted.set()
+        bot.stop()
+        if proxy:
+            claude_runner.PROXY_URL = None
+            proxy.stop()
+            _blk = proxy.block_summary()
+            log.record("proxy_stop", allowed=proxy.allowed, blocked=proxy.blocked,
+                       distinct_blocked_hosts=len(_blk), blocked_hosts=sorted(_blk)[:60])
+        if state.should_halt():
+            final_status = "halted"
         out.stop_live()
         state.clear_active()
         state.write_meta(status=final_status, pid=None, finished_at=time.time())
+        log.record("run_end", actor=operator(), status=final_status,
+                   confirmed=len(state.confirmed()), cost=state.read_meta().get("cost_usd"))
+        try:  # #7: campaign executive summary + technical index (deterministic)
+            ok, _, _ = log.verify()
+            write_executive_summary(state.dir, target, scope.label(), state.confirmed(),
+                                    state.read_meta().get("cost_usd") or 0.0,
+                                    "íntegra ✓" if ok else "VIOLADA ✗")
+        except Exception as e:
+            out.warn(f"executive summary error: {e}")
+        ev = {"denied": "denied", "halted": "halted"}.get(final_status, "finished")
+        notify.notify_event(ev, target, f"{len(state.confirmed())} confirmado(s) · "
+                            f"US$ {state.read_meta().get('cost_usd', 0):.2f}")
         state.activity(None, f"hunt {final_status}", kind="system")
         out.footer(state)

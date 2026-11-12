@@ -22,15 +22,24 @@ from pathlib import Path
 
 from . import config
 
-# action type -> risk. Unknown defaults to SENSITIVE (fail safe).
+# action type -> risk tier. Challenge #2: permitidas (passive, auto) /
+# condicionadas (sensitive, need approval) / proibidas (prohibited, auto-refused,
+# no approval can enable them). Unknown defaults to SENSITIVE (fail safe).
 _PASSIVE = {"recon", "passive", "read", "enumerate", "fingerprint", "discovery"}
 _SENSITIVE = {"active-hunt", "exploit", "exploitation", "privilege-escalation",
               "db-scan", "database-scan", "reverse-shell", "upload", "write",
               "lateral-movement", "data-exfil", "credential-access"}
+# Never allowed, even with human approval: destructive, abusive or clearly
+# out-of-engagement actions. These are refused deterministically.
+_PROHIBITED = {"destroy", "delete-data", "ransom", "encrypt-data", "dos", "ddos",
+               "denial-of-service", "phishing", "social-engineering", "exfil-pii-bulk",
+               "modify-production-data", "disable-logging", "persistence"}
 
 
 def risk(action_type: str) -> str:
     a = (action_type or "").strip().lower()
+    if a in _PROHIBITED:
+        return "prohibited"
     if a in _PASSIVE:
         return "passive"
     return "sensitive"  # sensitive or unknown -> treat as sensitive
@@ -122,7 +131,7 @@ class ApprovalStore:
 def require(store: ApprovalStore, action: str, target: str, context: str = "", *,
             mode: str | None = None, interactive: bool | None = None,
             wait: bool = True, timeout: int | None = None,
-            on_notice=None) -> Decision:
+            on_notice=None, on_pending=None) -> Decision:
     """The gate. Returns a Decision; the caller runs the action only if approved.
 
     mode: 'ask' (human-in-the-loop, default), 'yolo' (auto-approve, lab only),
@@ -130,6 +139,14 @@ def require(store: ApprovalStore, action: str, target: str, context: str = "", *
     """
     mode = (mode or config.AUTHZ_MODE or "ask").lower()
     rsk = risk(action)
+
+    # prohibited: refused deterministically, no mode or approval can enable it (#2)
+    if rsk == "prohibited":
+        rid = store.request(action, target, rsk, context)
+        store.decide(rid, False, "policy", "ação PROIBIDA pela política — recusada automaticamente")
+        if on_notice:
+            on_notice(f"ação proibida '{action}' recusada automaticamente (política de escopo)")
+        return Decision(False, "prohibited", rid, "policy")
 
     # passive auto-approve (unless paranoid), always logged
     if rsk == "passive" and mode != "paranoid":
@@ -159,7 +176,12 @@ def require(store: ApprovalStore, action: str, target: str, context: str = "", *
         store.decide(rid, approved, who, "aprovação interativa")
         return Decision(approved, "approved" if approved else "denied", rid, who)
 
-    # headless: wait for an external decision (fosc --approve / painel)
+    # headless: wait for an external decision (fosc --approve / painel / Telegram)
+    if on_pending:
+        try:
+            on_pending(rid, action, target, context)   # e.g. send the Telegram approval buttons
+        except Exception:
+            pass
     if on_notice:
         on_notice(f"aguardando autorização humana: {action} em {target} "
                   f"(id {rid}) — rode: fosc --approve {rid}")
