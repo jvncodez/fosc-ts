@@ -220,6 +220,14 @@ def build_parser() -> argparse.ArgumentParser:
                         help="envia uma mensagem de teste pro Telegram (valida token/chat)")
     action.add_argument("--deny", dest="action", action="store_const", const="deny",
                          help="negar um pedido de autorização (use com --id)")
+    action.add_argument("--enqueue", dest="action", action="store_const", const="enqueue",
+                         help="põe o alvo na fila de caçadas (um alvo = uma campanha)")
+    action.add_argument("--queue", dest="action", action="store_const", const="queue",
+                         help="mostra a fila de caçadas (em execução + aguardando)")
+    action.add_argument("--worker", dest="action", action="store_const", const="worker",
+                         help="roda o despachante: puxa jobs da fila e lança caçadas")
+    action.add_argument("--fix-pocs", dest="action", action="store_const", const="fix_pocs",
+                         help="adiciona o PoC do Windows (cmd.exe) aos relatórios já gerados do alvo")
 
     p.add_argument("-a", "--alvo", dest="target", default=None,
                     help="alvo: target domain or URL, e.g. alvo.com or https://app.alvo.com "
@@ -228,6 +236,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="porta: with -v, the localhost port to serve the viewer panel on (default 5555)")
 
     p.add_argument("--scope", help="explicit scope/authorization note passed to each hunt task")
+    p.add_argument("--priority", type=int, default=5, help="with --enqueue: 1 (mais alta) a 9 (mais baixa)")
     p.add_argument("--workers", type=int, default=config.DEFAULT_WORKERS)
     p.add_argument("--timeout", type=int, default=config.DEFAULT_TASK_TIMEOUT,
                     help="seconds per hunt task before it's killed")
@@ -339,6 +348,59 @@ def do_deny(args):
     _decide(args, False)
 
 
+
+def do_enqueue(args):
+    from . import jobqueue
+    q = jobqueue.get_queue()
+    opts = {"workers": args.workers, "timeout": args.timeout, "scope": args.scope,
+            "continuous": args.continuous, "max_items": args.max_items}
+    job, created = q.enqueue(args.target, opts, priority=args.priority, who=_whoami())
+    where = "SQS" if q.kind == "sqs" else "local"
+    if created:
+        pos = next((j["position"] for j in q.snapshot() if j["job_id"] == job["job_id"]), None)
+        print(f"enfileirado ({where}): {job['target']}  id={job['job_id']}"
+              + (f"  posição {pos}" if pos else "  (será iniciado já)"))
+    else:
+        print(f"já existe campanha para {job['target']} (status {job['status']}, id {job['job_id']}) — "
+              f"um alvo, uma campanha. Nada enfileirado.")
+
+
+def do_queue(args):
+    from . import jobqueue
+    q = jobqueue.get_queue()
+    rows = q.snapshot()
+    if not rows:
+        print("fila vazia.")
+        return
+    print(f"fila de caçadas · backend {q.kind} · {q.running_count()}/{config.MAX_HUNTS} em execução\n")
+    for j in rows:
+        if j["status"] == "running":
+            print(f"  ▶ EXECUTANDO  {j['target']:40}  id={j['job_id']}  por {j.get('who') or '-'}")
+        else:
+            eta = f"~{j['eta_s'] // 60} min" if j.get("eta_s") else "?"
+            print(f"  … posição {j['position']:<2}  {j['target']:40}  prioridade {j['priority']}  previsão {eta}")
+
+
+def do_worker(args):
+    from .dispatcher import Dispatcher
+    Dispatcher(on_event=lambda ev, job: print(f"[despachante] {ev}: {job['target']} (id {job['job_id']})")).run()
+
+
+def do_fix_pocs(args):
+    from . import pocfmt
+    state = RunState(args.target)
+    scanned, patched = pocfmt.patch_reports(state.dir)
+    print(f"relatórios de {args.target}: {scanned} verificado(s), {patched} com PoC do Windows adicionado.")
+
+
+def _whoami():
+    import getpass
+    try:
+        return getpass.getuser()
+    except Exception:
+        return "operador"
+
+
 DISPATCH = {
     "hunt": do_hunt,
     "chat": do_chat,
@@ -356,9 +418,13 @@ DISPATCH = {
     "approvals": do_approvals,
     "approve": do_approve,
     "deny": do_deny,
+    "enqueue": do_enqueue,
+    "queue": do_queue,
+    "worker": do_worker,
+    "fix_pocs": do_fix_pocs,
 }
 
-_NO_TARGET = ("view", "chat", "shell", "approvals", "approve", "deny", "telegram_test")
+_NO_TARGET = ("view", "chat", "shell", "approvals", "approve", "deny", "telegram_test", "queue", "worker")
 
 
 def main():

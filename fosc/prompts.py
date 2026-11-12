@@ -365,6 +365,12 @@ def build_hunt_prompt(target: str, scope_note: str, item: dict, classes: list[st
     if item.get("nuclei"):
         nuclei = "\nNuclei signals for this endpoint (leads, not proof):\n" + "\n".join(
             f"  [{h.get('severity')}] {h.get('name')} ({h.get('template')})" for h in item["nuclei"][:5])
+    lang = ""
+    if config.REPORT_LANG == "pt":
+        lang = ("\nIDIOMA DO RELATÓRIO: escreva os campos `title`, `summary`, `impact` e cada item de "
+                "`steps` em PORTUGUÊS DO BRASIL, claro e objetivo (nível corporativo). Mantenha em inglês "
+                "apenas termos técnicos consagrados (ex.: SQL injection, IDOR, mass assignment), nomes de "
+                "cabeçalhos/parâmetros/endpoints e o conteúdo literal de `repro_curl` e `evidence_marker`.\n")
     return f"""Scope: {scope_note}
 
 Item to hunt:
@@ -377,7 +383,7 @@ Item to hunt:
 {nuclei}{js_hint}
 
 Vuln classes to test, in priority order: {', '.join(classes[:6])}
-{auth}
+{auth}{lang}
 {learned or 'No lessons from past hunts yet.'}
 """
 

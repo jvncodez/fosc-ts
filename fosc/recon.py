@@ -1,4 +1,9 @@
-"""Mechanical recon: subfinder -> httpx (+tech) -> katana/gau/waybackurls -> nuclei.
+"""Mechanical recon, PROGRESSIVE: a fast phase (httpx + katana + JS mining) builds
+the first queue in ~1-2 min so testing starts right away; archives (gau/wayback),
+content brute-force and nuclei run in the BACKGROUND, in parallel, and feed new
+endpoints into the queue while the hunt is already running (BackgroundRecon).
+Every tool that touches the target takes its slice of the host's adaptive
+budget (fosc/ratectl.py).
 
 Deterministic and tool-driven, no LLM here. The output is deduplicated by
 route *pattern* (`/user/123?id=5` and `/user/456?id=9` are one item), so
@@ -13,9 +18,12 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, parse_qs
 
-from . import config
+from . import config, ratectl
 from .scope import Scope
 from .toolrunner import run_lines, run_proc, have
 
@@ -118,11 +126,12 @@ def discover_hosts(target: str, timeout: int) -> list[dict]:
     hosts = []
     if have("httpx"):
         try:
-            _, stdout, _ = run_proc(
-                ["httpx", "-silent", "-json", "-td", "-title", "-sc",
-                 "-rl", str(config.RECON_RATE), "-t", str(config.RECON_THREADS)],
-                input="\n".join(candidates), timeout=timeout,
-            )
+            with ratectl.share(target_host(target)) as (rate, threads):
+                _, stdout, _ = run_proc(
+                    ["httpx", "-silent", "-json", "-td", "-title", "-sc",
+                     "-rl", str(rate), "-t", str(threads)],
+                    input="\n".join(candidates), timeout=timeout,
+                )
             for line in stdout.splitlines():
                 try:
                     rec = json.loads(line)
@@ -144,29 +153,52 @@ def discover_hosts(target: str, timeout: int) -> list[dict]:
     return hosts
 
 
-def collect_urls(target: str, hosts: list[dict], timeout: int) -> set[str]:
+def crawl_urls(target: str, hosts: list[dict], timeout: int) -> set[str]:
+    """FAST phase: crawl the live hosts with katana (budgeted)."""
     found = {h["url"] for h in hosts}
     if have("katana"):
         for h in hosts:
-            found.update(
-                l.strip() for l in run_lines(
-                    ["katana", "-u", h["url"], "-silent", "-jc", "-kf", "all", "-d", "3",
-                     "-rl", str(config.RECON_RATE), "-c", str(config.RECON_THREADS), "-p", "1"], timeout)
-                if l.strip().startswith("http")
-            )
+            host = (urlparse(h["url"]).hostname or "").lower()
+            with ratectl.share(host) as (rate, threads):
+                found.update(
+                    l.strip() for l in run_lines(
+                        ["katana", "-u", h["url"], "-silent", "-jc", "-kf", "all", "-d", "3",
+                         "-rl", str(rate), "-c", str(threads), "-p", "1"], timeout)
+                    if l.strip().startswith("http")
+                )
+    return {u for u in found if in_scope(u, target)}
+
+
+def archive_urls(target: str, timeout: int) -> set[str]:
+    """BACKGROUND: historical URLs from third-party archives (gau + waybackurls,
+    in parallel). Does not touch the target, so it uses no host budget."""
     root = target_host(target)
-    if not _is_ip_or_local(root):
-        archive = []
-        if have("gau"):
-            archive += run_lines(["gau", "--subs", root], timeout)
-        if have("waybackurls"):
+    if _is_ip_or_local(root):
+        return set()
+    jobs = []
+    if have("gau"):
+        jobs.append(lambda: run_lines(["gau", "--subs", root], timeout))
+    if have("waybackurls"):
+        def _wb():
             try:
-                proc = subprocess.run(["waybackurls"], input=root, capture_output=True, text=True, timeout=timeout)
-                archive += proc.stdout.splitlines()
+                _, out, _ = run_proc(["waybackurls"], input=root, timeout=timeout)
+                return out.splitlines()
             except Exception as e:
                 print(f"[fosc] waybackurls failed: {e}")
-        found.update(u.strip() for u in archive[: config.MAX_ARCHIVE_URLS] if u.strip().startswith("http"))
-    return {u for u in found if in_scope(u, target)}
+                return []
+        jobs.append(_wb)
+    archive: list[str] = []
+    if jobs:
+        with ThreadPoolExecutor(max_workers=len(jobs)) as ex:
+            for lines in ex.map(lambda f: f(), jobs):
+                archive += lines
+    urls = {u.strip() for u in archive[: config.MAX_ARCHIVE_URLS] if u.strip().startswith("http")}
+    return {u for u in urls if in_scope(u, target)}
+
+
+def collect_urls(target: str, hosts: list[dict], timeout: int) -> set[str]:
+    """Crawl + archives in one blocking call (kept for the non-progressive path)."""
+    return crawl_urls(target, hosts, timeout) | archive_urls(target, timeout)
 
 
 # --- SPA / JS-bundle endpoint extraction ---------------------------------- #
@@ -272,17 +304,20 @@ def content_discovery(target: str, hosts: list[dict], timeout: int) -> set[str]:
         print("[fosc] content discovery: nenhuma wordlist encontrada, pulando")
         return set()
     bases = _content_bases(target, hosts)
+    per_base = max(30, timeout // max(1, len(bases)))   # `timeout` is the TOTAL budget
     found: set[str] = set()
     for base in bases:
+        host = (urlparse(base).hostname or "").lower()
         if have("feroxbuster"):
-            lines = run_lines(
-                ["feroxbuster", "-u", base, "-w", wl, "-x", config.CONTENT_EXTENSIONS,
-                 "-d", str(config.CONTENT_DEPTH), "-s", config.CONTENT_STATUS,
-                 "-t", str(config.RECON_THREADS), "--rate-limit", str(config.RECON_RATE), "--time-limit", f"{timeout}s", "--silent", "-k",
-                 "--no-state"], timeout + 20)
+            with ratectl.share(host, parts=2) as (rate, threads):
+                lines = run_lines(
+                    ["feroxbuster", "-u", base, "-w", wl, "-x", config.CONTENT_EXTENSIONS,
+                     "-d", str(config.CONTENT_DEPTH), "-s", config.CONTENT_STATUS,
+                     "-t", str(threads), "--rate-limit", str(rate), "--time-limit", f"{per_base}s",
+                     "--silent", "-k", "--no-state"], per_base + 20)
             found.update(l.strip() for l in lines if l.strip().startswith("http"))
         elif have("ffuf"):
-            found.update(_ffuf_base(base, wl, timeout))
+            found.update(_ffuf_base(base, wl, per_base))
         else:
             print("[fosc] content discovery: nem feroxbuster nem ffuf instalados, pulando")
             return set()
@@ -299,11 +334,12 @@ def _ffuf_base(base: str, wordlist: str, timeout: int) -> set[str]:
     with tempfile.NamedTemporaryFile("r", suffix=".json", delete=False) as tf:
         path = tf.name
     try:
-        run_proc(
-            ["ffuf", "-u", f"{base}/FUZZ", "-w", wordlist, "-e", exts,
-             "-mc", config.CONTENT_STATUS, "-ac", "-t", str(config.RECON_THREADS), "-rate", str(config.RECON_RATE),
-             "-maxtime", str(timeout), "-of", "json", "-o", path, "-s"],
-            timeout=timeout + 20)
+        with ratectl.share((urlparse(base).hostname or "").lower(), parts=2) as (rate, threads):
+            run_proc(
+                ["ffuf", "-u", f"{base}/FUZZ", "-w", wordlist, "-e", exts,
+                 "-mc", config.CONTENT_STATUS, "-ac", "-t", str(threads), "-rate", str(rate),
+                 "-maxtime", str(timeout), "-of", "json", "-o", path, "-s"],
+                timeout=timeout + 20)
         data = json.loads(open(path).read() or "{}")
         for r in data.get("results", []):
             if r.get("url"):
@@ -321,12 +357,15 @@ def _ffuf_base(base: str, wordlist: str, timeout: int) -> set[str]:
 def run_nuclei(hosts: list[dict], timeout: int) -> list[dict]:
     if not have("nuclei") or not hosts:
         return []
+    host = (urlparse(hosts[0]["url"]).hostname or "").lower()
     try:
-        _, nuclei_out, _ = run_proc(
-            ["nuclei", "-silent", "-jsonl", "-severity", "medium,high,critical", "-nc",
-             "-rl", str(config.RECON_RATE), "-c", str(config.RECON_THREADS), "-bs", str(config.RECON_THREADS), "-timeout", "10", "-retries", "1", "-mhe", "10"],
-            input="\n".join(h["url"] for h in hosts), timeout=timeout,
-        )
+        with ratectl.share(host, parts=2) as (rate, threads):
+            _, nuclei_out, _ = run_proc(
+                ["nuclei", "-silent", "-jsonl", "-severity", "medium,high,critical", "-nc",
+                 "-rl", str(rate), "-c", str(threads), "-bs", str(threads),
+                 "-timeout", "10", "-retries", "1", "-mhe", "10"],
+                input="\n".join(h["url"] for h in hosts), timeout=timeout,
+            )
     except subprocess.TimeoutExpired:
         print(f"[fosc] nuclei timed out after {timeout}s, continuing without it")
         return []
@@ -367,13 +406,21 @@ def build_items(urls: set[str], hosts: list[dict], nuclei_hits: list[dict]) -> t
             "host": host, "pattern": pat, "tech": tech_by_host.get(host, []),
             "examples": [u], "nuclei": [],
         }
+    items = list(by_pattern.values())
+    attach_hits(items, nuclei_hits)
+    return items, js_files
+
+
+def attach_hits(items: list[dict], nuclei_hits: list[dict]) -> None:
+    """Attach nuclei hits to the items they matched (ranking signal). Idempotent."""
     for hit in nuclei_hits:
         matched = hit.get("matched") or ""
         mpat = route_pattern(matched) if matched.startswith("http") else None
-        for it in by_pattern.values():
+        for it in items:
             if (mpat and it["pattern"] == mpat) or (matched and matched.rstrip("/") == it["url"].rstrip("/")):
-                it["nuclei"].append(hit)
-    return list(by_pattern.values()), js_files
+                bucket = it.setdefault("nuclei", [])
+                if hit not in bucket:
+                    bucket.append(hit)
 
 
 def build_surface(target: str, recon_timeout: int = config.DEFAULT_RECON_TIMEOUT, nuclei: bool = True,
@@ -391,30 +438,162 @@ def build_surface(target: str, recon_timeout: int = config.DEFAULT_RECON_TIMEOUT
     return {"hosts": hosts, "items": items, "js": js_files, "nuclei": hits}
 
 
-def load_or_build(target: str, run_dir, fresh: bool = False, nuclei: bool = True, content: bool = True) -> dict:
-    cache = run_dir / "surface.json"
-    if cache.exists() and not fresh:
-        try:
-            data = json.loads(cache.read_text())
-            if isinstance(data, dict) and "items" in data:
-                return data
-        except json.JSONDecodeError:
-            pass
-    surface = build_surface(target, nuclei=nuclei, content=content)
-    if cache.exists() and fresh:
-        # continuous re-recon: keep previously known items, add new ones
-        try:
-            old = json.loads(cache.read_text())
-            if isinstance(old, dict):
-                known = {it["pattern"] for it in surface["items"]}
-                surface["items"] += [it for it in old.get("items", []) if it.get("pattern") not in known]
-        except json.JSONDecodeError:
-            pass
+def _cache_fresh(cache) -> bool:
+    try:
+        return cache.exists() and (time.time() - cache.stat().st_mtime) < config.RECON_CACHE_TTL
+    except OSError:
+        return False
+
+
+def _read_cache(cache) -> dict | None:
+    try:
+        data = json.loads(cache.read_text())
+        return data if isinstance(data, dict) and "items" in data else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _save_cache(cache, surface: dict) -> bool:
     from . import toolrunner
     if toolrunner.HOLD.is_set():
         # halt/disjuntor interrompeu o recon: superfície parcial NÃO vai para o cache,
         # senão a próxima caçada reaproveitaria um recon incompleto.
         print("[fosc] recon interrompido (halt/disjuntor) — superfície parcial não foi salva")
-        return surface
+        return False
     cache.write_text(json.dumps(surface, indent=2))
+    return True
+
+
+def load_or_build(target: str, run_dir, fresh: bool = False, nuclei: bool = True, content: bool = True) -> dict:
+    """Blocking, all-at-once recon (kept for callers that need the full surface)."""
+    cache = run_dir / "surface.json"
+    if not fresh and _cache_fresh(cache) and (data := _read_cache(cache)):
+        return data
+    surface = build_surface(target, nuclei=nuclei, content=content)
+    if fresh and (old := _read_cache(cache)):
+        # continuous re-recon: keep previously known items, add new ones
+        known = {it["pattern"] for it in surface["items"]}
+        surface["items"] += [it for it in old.get("items", []) if it.get("pattern") not in known]
+    _save_cache(cache, surface)
     return surface
+
+
+# --- progressive recon ------------------------------------------------------ #
+
+def fast_surface(target: str, timeout: int = config.RECON_FAST_TIMEOUT) -> dict:
+    """What is needed to START testing: live hosts, crawl and JS mining.
+    On a SPA, JS mining is where almost every endpoint comes from."""
+    t0 = time.time()
+    hosts = discover_hosts(target, timeout)
+    urls = crawl_urls(target, hosts, timeout)
+    if config.JS_MINING:
+        urls |= js_endpoints(target, urls, hosts, min(timeout, 20))
+    items, js_files = build_items(urls, hosts, [])
+    print(f"[fosc] recon rápido: {len(hosts)} host(s), {len(items)} endpoint(s) em {time.time() - t0:.0f}s "
+          f"— caçada pode começar; arquivos/força bruta/nuclei seguem em segundo plano")
+    return {"hosts": hosts, "items": items, "js": js_files, "nuclei": [], "urls": sorted(urls)}
+
+
+class BackgroundRecon:
+    """Slow recon stages in parallel, off the critical path. The engine calls
+    drain() to pull endpoints discovered since the last call into its queue."""
+
+    def __init__(self, target: str, surface: dict, cache, *, nuclei: bool = True, content: bool = True,
+                 budget: int = config.RECON_BG_BUDGET):
+        self.target = target
+        self.surface = surface
+        self.cache = cache
+        self.nuclei = nuclei
+        self.content = content and config.CONTENT_DISCOVERY
+        self.deadline = time.time() + budget
+        self.done = threading.Event()
+        self._lock = threading.Lock()
+        self._known = {it["pattern"] for it in surface.get("items", [])}
+        self._urls = set(surface.get("urls", []))
+        self._pending: list[dict] = []
+        self._hits: list[dict] = []
+        self.stats = {"archive": None, "content": None, "nuclei": None}
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self):
+        self._thread.start()
+        return self
+
+    def _left(self, cap: int) -> int:
+        return max(5, min(cap, int(self.deadline - time.time())))
+
+    def _add_urls(self, stage: str, urls: set[str]):
+        new_urls = {u for u in urls if u not in self._urls}
+        items, _ = build_items(new_urls, self.surface["hosts"], [])
+        with self._lock:
+            self._urls |= new_urls
+            fresh = [it for it in items if it["pattern"] not in self._known]
+            self._known |= {it["pattern"] for it in fresh}
+            self._pending += fresh
+            self.stats[stage] = len(fresh)
+        print(f"[fosc] recon de fundo ({stage}): +{len(fresh)} endpoint(s) novo(s)")
+
+    def _stage(self, stage: str, fn):
+        try:
+            fn()
+        except Exception as e:  # one stage failing never stops the others or the hunt
+            print(f"[fosc] recon de fundo ({stage}) falhou: {e}")
+            self.stats[stage] = f"erro: {e}"
+
+    def _run(self):
+        hosts = self.surface["hosts"]
+        stages = [("archive", lambda: self._add_urls("archive", archive_urls(self.target, self._left(config.ARCHIVE_TIMEOUT))))]
+        if self.content:
+            stages.append(("content", lambda: self._add_urls(
+                "content", content_discovery(self.target, hosts, self._left(config.CONTENT_BUDGET)))))
+        if self.nuclei:
+            def _nuc():
+                hits = run_nuclei(hosts, self._left(config.NUCLEI_TIMEOUT))
+                with self._lock:
+                    self._hits += hits
+                    self.stats["nuclei"] = len(hits)
+                print(f"[fosc] recon de fundo (nuclei): {len(hits)} hit(s)")
+            stages.append(("nuclei", _nuc))
+        with ThreadPoolExecutor(max_workers=len(stages)) as ex:
+            for name, fn in stages:
+                ex.submit(self._stage, name, fn)
+        self._finish()
+
+    def _finish(self):
+        with self._lock:
+            hits = list(self._hits)
+            urls = set(self._urls)
+        items, js_files = build_items(urls, self.surface["hosts"], hits)
+        final = {"hosts": self.surface["hosts"], "items": items, "js": js_files, "nuclei": hits}
+        if _save_cache(self.cache, final):
+            print(f"[fosc] recon completo: {len(items)} endpoint(s), {len(hits)} nuclei hit(s) — cache salvo")
+        self.final = final
+        self.done.set()
+
+    def drain(self) -> tuple[list[dict], list[dict]]:
+        """New items since the last call + all nuclei hits so far (for ranking)."""
+        with self._lock:
+            out, self._pending = self._pending, []
+            return out, list(self._hits)
+
+    @property
+    def running(self) -> bool:
+        return not self.done.is_set()
+
+
+def start_progressive(target: str, run_dir, fresh: bool = False, nuclei: bool = True,
+                      content: bool = True) -> tuple[dict, "BackgroundRecon | None"]:
+    """Returns (surface to start hunting NOW, background recon or None).
+    A recon cached less than RECON_CACHE_TTL ago is reused as-is (another
+    operator or an earlier run already paid for it)."""
+    cache = run_dir / "surface.json"
+    if not fresh and _cache_fresh(cache) and (data := _read_cache(cache)):
+        print(f"[fosc] recon em cache ({len(data['items'])} endpoint(s), "
+              f"{(time.time() - cache.stat().st_mtime) / 60:.0f} min) — reaproveitado")
+        return data, None
+    surface = fast_surface(target)
+    if fresh and (old := _read_cache(cache)):
+        known = {it["pattern"] for it in surface["items"]}
+        surface["items"] += [it for it in old.get("items", []) if it.get("pattern") not in known]
+    bg = BackgroundRecon(target, surface, cache, nuclei=nuclei, content=content).start()
+    return surface, bg

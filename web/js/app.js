@@ -99,11 +99,13 @@ function route() {
   let view = "hunts", target = null;
   if (h.startsWith("#/t/")) target = decodeURIComponent(h.slice(4));
   else if (h === "#/chat") view = "chat";
+  else if (h === "#/queue") view = "queue";
   else if (h === "#/knowledge") view = "knowledge";
   else if (h === "#/settings") view = "settings";
   S.view = view;
   $("#viewHunt").hidden = view !== "hunts";
   $("#viewChat").hidden = view !== "chat";
+  $("#viewQueue").hidden = view !== "queue";
   $("#viewKnowledge").hidden = view !== "knowledge";
   $("#viewSettings").hidden = view !== "settings";
   $$(".nav-link").forEach((a) => a.classList.toggle("active", a.dataset.view === view));
@@ -118,6 +120,7 @@ function route() {
     delete $("#feed").dataset.last;
   }
   if (view === "chat") loadChat();
+  if (view === "queue") loadQueue();
   if (view === "knowledge") loadKnowledge();
   if (view === "settings") loadSettings();
   renderSidebar();
@@ -448,10 +451,37 @@ async function openFinding(id) {
       ${f.repro_curl ? `<div class="section-t">Reprodução</div>${codebox(f.repro_curl)}` : ""}
       ${f.evidence_marker ? `<div class="section-t">Evidência esperada</div><div class="md"><code>${esc(f.evidence_marker)}</code></div>` : ""}
       ${f.review ? `<div class="section-t">Revisão independente (Opus)</div><div class="md">${md(f.review)}</div>` : ""}` },
+    ...(f.council ? [{ name: "Conselho", render: async () => councilTab(f.council) }] : []),
     { name: "Relatório", render: async () => r.report ? `<div class="md">${md(r.report)}</div>` : `<div class="idle">sem report.md</div>` },
     { name: "Log do agente", render: () => logTab(f.item_id) },
   ]);
 }
+
+const RISCO_PT = { nenhum: "Nenhum", baixo: "Baixo", medio: "Médio", alto: "Alto", critico: "Crítico" };
+
+function councilTab(c) {
+  const ok = c.aprovado;
+  const head = `<div class="council-verdict ${ok ? "ap" : "veto"}">`
+    + `<b>${ok ? "✓ APROVADO" : "⛔ VETADO"}</b> · ${c.cadeiras_ok || 0}/5 cadeiras</div>`;
+  const kv = `<dl class="kv">
+    <dt>Severidade corporativa</dt><dd>${sevBadge((c.severidade_final || "").toLowerCase()) || "—"}</dd>
+    <dt>Confiança</dt><dd>${esc(cap(c.confianca_final))}</dd>
+    <dt>Risco corporativo</dt><dd>${esc(RISCO_PT[c.risco_corporativo] || "—")}</dd>
+    ${c.lgpd_dado_pessoal ? `<dt>LGPD</dt><dd>Envolve dado pessoal — avaliar comunicação (art. 48)</dd>` : ""}
+    ${(c.cia_pilares || []).length ? `<dt>Tríade CIA</dt><dd>${esc((c.cia_pilares || []).join(", "))}</dd>` : ""}
+  </dl>`;
+  const vetos = (c.motivos_veto || []).length
+    ? `<div class="section-t">Vetos</div><div class="md"><ul>${c.motivos_veto.map((v) =>
+        `<li><b>${esc(v.cadeira)}</b> — ${esc(v.motivo || "")}</li>`).join("")}</ul></div>`
+    : "";
+  const pareceres = (c.pareceres || []).filter((p) => p.ok).map((p) =>
+    `<div class="parecer${p.veto ? " veto" : ""}">
+      <div class="parecer-h"><b>${esc(p.nome || p.cadeira)}</b>${p.veto ? ` <span class="tag-veto">veto</span>` : ""}</div>
+      <div class="md">${md(p.parecer || "")}</div></div>`).join("");
+  return head + kv + vetos + `<div class="section-t">Pareceres</div>` + (pareceres || `<div class="idle">sem pareceres</div>`);
+}
+
+function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : "—"; }
 
 function openResult(r) {
   openDrawer(`
@@ -499,6 +529,24 @@ async function control(action) {
   const r = await api("/api/control", { target: S.target, action });
   const msg = { pause: "Pausa solicitada", resume: "Caçada retomada", stop: "Parada solicitada" }[action];
   r.ok ? toast(msg, S.target, "ok") : toast("Erro", r.error || "", "err");
+}
+
+// ---------------------------------------------------------------- queue
+async function loadQueue() {
+  const d = await api("/api/queue");
+  if (S.view !== "queue") return;
+  renderQueue(d);
+}
+function renderQueue(d) {
+  const jobs = d.jobs || [];
+  const waiting = jobs.filter((j) => j.status === "queued").length;
+  $("#queueKpis").innerHTML = `
+    <div class="kpi accent"><div class="label">Em execução</div><div class="value">${d.running || 0}<small>/ ${d.cap}</small></div><div class="sub">limite global</div></div>
+    <div class="kpi"><div class="label">Aguardando</div><div class="value">${waiting}</div></div>
+    <div class="kpi"><div class="label">Backend</div><div class="value" style="font-size:18px">${esc(d.backend || "local")}</div><div class="sub">${d.backend === "sqs" ? "Amazon SQS FIFO" : "fila local"}</div></div>`;
+  $("#queueTable tbody").innerHTML = jobs.length ? jobs.map((j) => j.status === "running" ? `
+    <tr><td><span class="v v-confirmed">em execução</span></td><td class="url">${esc(j.target)}</td><td>${esc(j.priority)}</td><td>${esc(j.who || "—")}</td><td class="num">—</td></tr>` : `
+    <tr><td><span class="muted">posição ${j.position}</span></td><td class="url">${esc(j.target)}</td><td>${esc(j.priority)}</td><td>${esc(j.who || "—")}</td><td class="num">${j.eta_s ? "~" + Math.round(j.eta_s / 60) + " min" : "—"}</td></tr>`).join("") : `<tr><td colspan="5" class="idle">fila vazia</td></tr>`;
 }
 
 // ---------------------------------------------------------------- knowledge
@@ -624,6 +672,8 @@ function wire() {
     $$("[data-uptime]").forEach((el) => { if (el.dataset.uptime) el.textContent = fmtDur(now() - Number(el.dataset.uptime)); });
   }, 1000);
   setInterval(() => { if (S.view === "knowledge") loadKnowledge(); }, 15000);
+  setInterval(() => { if (S.view === "queue") loadQueue(); }, 4000);
+  api("/api/queue").then((d) => { $("#navQueue").hidden = !(d && d.enabled); }).catch(() => {});
 
   window.addEventListener("hashchange", route);
 }

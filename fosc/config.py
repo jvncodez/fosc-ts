@@ -38,7 +38,7 @@ CONTENT_WORDLISTS = [                # first one that exists on disk is used
 CONTENT_EXTENSIONS = "php,html,sql,ini,bak,txt,old,json,conf,inc,zip,env,git,asp,aspx,jsp,do"
 CONTENT_DEPTH = 2                    # feroxbuster recursion depth
 CONTENT_TIMEOUT = 240               # seconds budget per base URL scan
-CONTENT_MAX_BASES = 6               # cap how many base URLs we brute-force
+CONTENT_MAX_BASES = 3               # cap how many base URLs we brute-force
 CONTENT_MAX_RESULTS = 1500          # cap discovered URLs fed to the surface
 CONTENT_STATUS = "200,204,301,302,307,401,403,405"
 
@@ -48,11 +48,40 @@ CONTENT_STATUS = "200,204,301,302,307,401,403,405"
 # ferramentas (nuclei 150 req/s, ferox/ffuf 40 threads) derrubam servidor
 # pequeno. Ajustável por env para alvos robustos.
 RECON_RATE = int(os.environ.get("SENTINELA_RECON_RATE", "10"))       # req/s por ferramenta
+# Taxa ADAPTATIVA por host (fosc/ratectl.py): orçamento único por host, dividido
+# entre as ferramentas simultâneas; sobe com o alvo saudável, cai pela metade se
+# ficar lento/falhar. RECON_RATE continua valendo para chamadas sem host.
+RATE_START = int(os.environ.get("SENTINELA_RATE_START", "25"))
+RATE_MIN = int(os.environ.get("SENTINELA_RATE_MIN", "3"))
+RATE_MAX = int(os.environ.get("SENTINELA_RATE_MAX", "60"))
+RATE_STEP = int(os.environ.get("SENTINELA_RATE_STEP", "5"))
+RATE_SLOW_MS = int(os.environ.get("SENTINELA_RATE_SLOW_MS", "1500"))   # latência considerada lenta
+# Recon PROGRESSIVO: a fase rápida libera a caçada; o resto roda em paralelo, em
+# segundo plano, e alimenta a fila enquanto os testes acontecem.
+RECON_FAST_TIMEOUT = int(os.environ.get("SENTINELA_RECON_FAST", "90"))      # httpx/katana
+RECON_BG_BUDGET = int(os.environ.get("SENTINELA_RECON_BG_BUDGET", "420"))   # teto total do recon de fundo
+ARCHIVE_TIMEOUT = int(os.environ.get("SENTINELA_ARCHIVE_TIMEOUT", "60"))    # gau/wayback (terceiros)
+CONTENT_BUDGET = int(os.environ.get("SENTINELA_CONTENT_BUDGET", "180"))     # força bruta, total
+NUCLEI_TIMEOUT = int(os.environ.get("SENTINELA_NUCLEI_TIMEOUT", "300"))
+RECON_CACHE_TTL = int(os.environ.get("SENTINELA_RECON_TTL", str(6 * 3600)))  # reaproveita recon por 6h
+
+# --- Fila de caçadas (fase 3): N pentesters, concorrência global controlada ---
+# SQS quando SENTINELA_SQS_URL existe (produção/AWS), senão SQLite local.
+SQS_URL = os.environ.get("SENTINELA_SQS_URL", "")
+# Fila ligada: sempre no SQS; local só quando explicitamente pedido (SENTINELA_QUEUE=1),
+# para o uso single-box continuar lançando a caçada direto do painel.
+QUEUE_ENABLED = bool(SQS_URL) or os.environ.get("SENTINELA_QUEUE", "").lower() in ("1", "true", "yes")
+AWS_REGION = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+MAX_HUNTS = int(os.environ.get("SENTINELA_MAX_HUNTS", "5"))        # caçadas simultâneas (cota Bedrock)
+QUEUE_ETA_PER_JOB = int(os.environ.get("SENTINELA_QUEUE_ETA", "180"))  # s por posição, estimativa p/ UI
+QUEUE_POLL = int(os.environ.get("SENTINELA_QUEUE_POLL", "5"))      # s entre ciclos do despachante
+SQS_WAIT = int(os.environ.get("SENTINELA_SQS_WAIT", "10"))         # long-poll SQS
+SQS_VISIBILITY = int(os.environ.get("SENTINELA_SQS_VISIBILITY", "3600"))  # s de invisibilidade da msg
 RECON_THREADS = int(os.environ.get("SENTINELA_RECON_THREADS", "5"))  # conexões simultâneas
 # Disjuntor: sonda o alvo periodicamente; N falhas seguidas (timeout, erro de
 # conexão ou 502/503/504) pausam a caçada e encerram o que está em voo.
 HEALTH_CHECK = os.environ.get("SENTINELA_HEALTH", "1").lower() not in ("0", "false", "no")
-HEALTH_INTERVAL = int(os.environ.get("SENTINELA_HEALTH_INTERVAL", "20"))  # s entre sondas
+HEALTH_INTERVAL = int(os.environ.get("SENTINELA_HEALTH_INTERVAL", "10"))  # s entre sondas (também ajusta a taxa)
 HEALTH_FAILS = int(os.environ.get("SENTINELA_HEALTH_FAILS", "3"))        # falhas seguidas p/ desarmar
 HEALTH_TIMEOUT = int(os.environ.get("SENTINELA_HEALTH_TIMEOUT", "10"))   # s por sonda
 
@@ -96,6 +125,7 @@ MODEL_LADDERS = {
     "verify":      ["opus", "sonnet"],
     "consolidate": ["sonnet", "haiku"],
     "privesc":     ["sonnet", "opus"],
+    "council":     ["sonnet", "haiku"],   # 5 cadeiras × achado: barato por padrão
 }
 
 MODEL_MAX_ATTEMPTS = 3        # never try more than this many models for one call
@@ -123,6 +153,13 @@ PROXY_EGRESS_HOSTS = [
 # single endpoint from running away. budget 0 = uncapped.
 HUNT_EFFORT = "high"                 # reasoning effort per hunt task
 VERIFY_EFFORT = "high"               # reasoning effort for the Opus review
+
+# --- Conselho de 5 cadeiras (LGPD, CIA, usuário, corporativo, governança) -----
+COUNCIL_ENABLED = os.environ.get("SENTINELA_COUNCIL", "1").lower() not in ("0", "false", "no")
+COUNCIL_TIMEOUT = int(os.environ.get("SENTINELA_COUNCIL_TIMEOUT", "180"))  # s por cadeira
+COUNCIL_EFFORT = os.environ.get("SENTINELA_COUNCIL_EFFORT", "medium")
+# Idioma dos achados/PoC: relatório e campos gerados pelo agente em português.
+REPORT_LANG = os.environ.get("SENTINELA_REPORT_LANG", "pt")
 DEFAULT_TASK_BUDGET_USD = 3.0        # max spend per endpoint (0 = uncapped)
 
 # Privesc is deeper than a single web endpoint: more enumeration, more retries,

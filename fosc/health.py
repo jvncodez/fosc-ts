@@ -76,7 +76,8 @@ class TargetHealth:
     """Background prober wired to engine callbacks."""
 
     def __init__(self, url: str, on_trip, on_recover, interval: int = config.HEALTH_INTERVAL,
-                 fails: int = config.HEALTH_FAILS, timeout: int = config.HEALTH_TIMEOUT, prober=probe):
+                 fails: int = config.HEALTH_FAILS, timeout: int = config.HEALTH_TIMEOUT, prober=probe,
+                 on_sample=None):
         self.url = url
         self.on_trip = on_trip
         self.on_recover = on_recover
@@ -85,6 +86,7 @@ class TargetHealth:
         self.breaker = Breaker(fails)
         self.last = ""
         self._prober = prober
+        self.on_sample = on_sample   # (ok, latency_ms) -> feeds the adaptive rate (ratectl)
         self._stop = threading.Event()
         self._thread = None
 
@@ -104,10 +106,14 @@ class TargetHealth:
 
     def _loop(self):
         while not self._stop.wait(self.interval):
+            t0 = time.time()
             ok, detail = self._prober(self.url, self.timeout)
+            ms = (time.time() - t0) * 1000
             self.last = detail
             ev = self.breaker.feed(ok)
             try:
+                if self.on_sample:
+                    self.on_sample(ok, ms)
                 if ev == "trip":
                     self.on_trip(detail)
                 elif ev == "recover":

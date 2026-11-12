@@ -3,7 +3,7 @@ import shutil
 import time
 from pathlib import Path
 
-from . import mitre
+from . import mitre, pocfmt
 
 
 def write_report(run_dir: Path, fid: str, target: str, item: dict, finding: dict,
@@ -26,39 +26,68 @@ def write_report(run_dir: Path, fid: str, target: str, item: dict, finding: dict
     sev = (review.get("severity") or finding.get("severity") or "unrated").capitalize()
     cvss = review.get("cvss") if review.get("cvss") is not None else finding.get("cvss")
     cls = review.get("vuln_class") or finding.get("vuln_class") or "Vulnerability"
-    title = finding.get("title") or f"{cls} on {item.get('path') or item['url']}"
+    title = finding.get("title") or f"{cls} em {item.get('path') or item['url']}"
     steps = finding.get("steps") or []
     md = [
         f"# {title}",
         "",
-        f"- **Target:** {target}",
+        f"- **Alvo:** {target}",
         f"- **Endpoint:** `{item['url']}`",
-        f"- **Class:** {cls}",
-        f"- **Severity:** {sev}" + (f" (CVSS {cvss})" if cvss is not None else ""),
-        f"- **Confidence:** {(finding.get('confidence') or 'medium').capitalize()}",
+        f"- **Classe:** {cls}",
+        f"- **Severidade:** {sev}" + (f" (CVSS {cvss})" if cvss is not None else ""),
+        f"- **Confiança:** {(finding.get('confidence') or 'medium').capitalize()}",
         f"- **MITRE ATT&CK:** {_mitre_tags(finding, cls)}",
-        f"- **Found:** {time.strftime('%Y-%m-%d %H:%M', time.localtime())}",
+        f"- **Encontrado em:** {time.strftime('%d/%m/%Y %H:%M', time.localtime())}",
         "",
-        "## Summary",
+        "## Resumo",
         finding.get("summary") or "",
         "",
-        "## Impact",
-        finding.get("impact") or "_to be written_",
+        "## Impacto",
+        finding.get("impact") or "_a redigir_",
         "",
-        "## Steps to reproduce",
+        "## Passos para reprodução",
         *(f"{i}. {s}" for i, s in enumerate(steps, 1)),
     ]
     if finding.get("repro_curl"):
-        md += ["", "```bash", finding["repro_curl"], "```"]
+        md += ["", *pocfmt.blocks(finding["repro_curl"])]
     if finding.get("evidence_marker"):
-        md += ["", f"Expected evidence in the response: `{finding['evidence_marker']}`"]
+        md += ["", f"Evidência esperada na resposta: `{finding['evidence_marker']}`"]
     techs = finding.get("mitre") or mitre.techniques(cls)
     if techs:
         md += ["", "## MITRE ATT&CK",
                *(f"- **{t['id']}** {t['name']} _({t['tactic']})_" for t in techs)]
-    md += ["", "## Independent review", review.get("reason") or "", ""]
+    md += ["", "## Revisão independente", review.get("reason") or "", ""]
+    md += _council_section(finding.get("council"))
     (out_dir / "report.md").write_text("\n".join(md))
     return f"pocs/{fid}/report.md"
+
+
+_RISCO_PT = {"nenhum": "Nenhum", "baixo": "Baixo", "medio": "Médio", "alto": "Alto", "critico": "Crítico"}
+
+
+def _council_section(decisao: dict | None) -> list[str]:
+    if not decisao:
+        return []
+    md = ["", "## Parecer do Conselho"]
+    veredito = "APROVADO" if decisao.get("aprovado") else "VETADO"
+    md.append(f"- **Veredito:** {veredito} ({decisao.get('cadeiras_ok', 0)}/5 cadeiras)")
+    md.append(f"- **Severidade corporativa:** {(decisao.get('severidade_final') or '-').capitalize()}")
+    md.append(f"- **Confiança:** {(decisao.get('confianca_final') or '-').capitalize()}")
+    md.append(f"- **Risco corporativo:** {_RISCO_PT.get(decisao.get('risco_corporativo'), '-')}")
+    if decisao.get("lgpd_dado_pessoal"):
+        md.append("- **LGPD:** envolve dado pessoal — avaliar dever de comunicação (art. 48).")
+    if decisao.get("cia_pilares"):
+        md.append(f"- **Tríade CIA:** {', '.join(decisao['cia_pilares'])}")
+    if decisao.get("motivos_veto"):
+        md.append("- **Vetos:** " + "; ".join(f"{v['cadeira']} — {v['motivo']}"
+                                               for v in decisao["motivos_veto"]))
+    md.append("")
+    for p in decisao.get("pareceres", []):
+        if p.get("ok"):
+            marca = " ⛔" if p.get("veto") else ""
+            md.append(f"**{p['nome']}**{marca} — {p.get('parecer', '')}")
+            md.append("")
+    return md
 
 
 def _mitre_tags(finding: dict, cls: str) -> str:

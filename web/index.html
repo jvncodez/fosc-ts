@@ -28,6 +28,7 @@
     <nav class="side-nav">
       <a href="#/" data-view="hunts" class="nav-link"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>Caçadas</a>
       <a href="#/chat" data-view="chat" class="nav-link"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>Conversa</a>
+      <a href="#/queue" data-view="queue" class="nav-link" id="navQueue" hidden><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Fila</a>
       <a href="#/knowledge" data-view="knowledge" class="nav-link"><svg viewBox="0 0 24 24"><path d="M5 4h10l4 4v12H5z"/><path d="M9 12h6M9 16h6"/></svg>Aprendizado</a>
       <a href="#/settings" data-view="settings" class="nav-link"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>Configurações</a>
     </nav>
@@ -107,6 +108,27 @@
     </section>
 
     <!-- ============ KNOWLEDGE VIEW ============ -->
+    <!-- ============ QUEUE VIEW ============ -->
+    <section class="view" id="viewQueue" hidden>
+      <header class="page-head">
+        <div>
+          <div class="eyebrow">Orquestração</div>
+          <h1>Fila de caçadas</h1>
+          <div class="head-meta" id="queueMeta">Vários pentesters, uma fila. Um alvo tem uma campanha só; a concorrência é limitada para não sobrecarregar os modelos nem os alvos.</div>
+        </div>
+      </header>
+      <div class="kpis" id="queueKpis"></div>
+      <div class="card">
+        <div class="card-head"><h3>Em execução e aguardando</h3></div>
+        <div class="table-wrap">
+          <table class="table" id="queueTable">
+            <thead><tr><th>Situação</th><th>Alvo</th><th>Prioridade</th><th>Quem</th><th class="num">Previsão</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <section class="view" id="viewKnowledge" hidden>
       <header class="page-head">
         <div>

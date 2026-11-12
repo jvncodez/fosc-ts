@@ -25,11 +25,24 @@ from .claude_runner import stream_to_text
 from .notify import send_telegram
 from .state import RunState, list_runs
 
-WEB_DIR = Path(__file__).resolve().parent / "web"
-STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
-          "/app.css": ("app.css", "text/css; charset=utf-8"),
-          "/app.js": ("app.js", "application/javascript; charset=utf-8"),
-          "/logo.svg": ("logo.svg", "image/svg+xml")}
+_JS = "application/javascript; charset=utf-8"
+# Front FOSC/TS (web/ na raiz do repo, mantido pela equipe de design) quando
+# existe; senão o painel legado em fosc/web. Fixed whitelist — no path traversal.
+_FRONT = Path(__file__).resolve().parent.parent / "web"
+if (_FRONT / "index.html").is_file():
+    WEB_DIR = _FRONT
+    STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
+              "/css/app.css": ("css/app.css", "text/css; charset=utf-8"),
+              "/js/app.js": ("js/app.js", _JS),
+              "/assets/logo.svg": ("assets/logo.svg", "image/svg+xml"),
+              # modo demo desligado: servido pelo agente, o front usa a API real
+              "/js/mock.js": (None, _JS)}
+else:
+    WEB_DIR = Path(__file__).resolve().parent / "web"
+    STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
+              "/app.css": ("app.css", "text/css; charset=utf-8"),
+              "/app.js": ("app.js", _JS),
+              "/logo.svg": ("logo.svg", "image/svg+xml")}
 TARGET_RX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-:/_]{0,250}$")
 LIVE = ("running", "paused", "sleeping", "recon")
 
@@ -53,10 +66,31 @@ def overview() -> dict:
                        "live": sum(1 for t in targets if t["status"] in LIVE)}}
 
 
+def queue_state() -> dict:
+    if not config.QUEUE_ENABLED:
+        return {"enabled": False, "jobs": [], "running": 0, "cap": config.MAX_HUNTS}
+    from . import jobqueue
+    q = jobqueue.get_queue()
+    return {"enabled": True, "backend": q.kind, "cap": config.MAX_HUNTS,
+            "running": q.running_count(), "jobs": q.snapshot()}
+
+
 def start_hunt(p: dict) -> dict:
     target = config.normalize_target(p.get("target") or "")
     if not TARGET_RX.match(target):
         return {"ok": False, "error": "alvo inválido"}
+    # Com a fila ativa, o painel enfileira (concorrência global, um alvo = uma
+    # campanha). Um despachante/worker lança a caçada quando houver vaga.
+    if config.QUEUE_ENABLED:
+        from . import jobqueue
+        q = jobqueue.get_queue()
+        opts = {k: p.get(k) for k in ("workers", "timeout", "max_items", "continuous", "fresh", "no_nuclei", "scope")}
+        job, created = q.enqueue(target, opts, priority=int(p.get("priority") or 5),
+                                 who=p.get("who") or "painel")
+        pos = next((j.get("position") for j in q.snapshot() if j["job_id"] == job["job_id"]), None)
+        return {"ok": True, "queued": True, "created": created, "job_id": job["job_id"],
+                "position": pos, "target": target,
+                "message": ("enfileirado" if created else "já havia campanha para este alvo")}
     st = RunState(target)
     if st.status() in LIVE:
         return {"ok": False, "error": f"já existe uma caçada rodando em {target}"}
@@ -116,6 +150,10 @@ def finding_detail(target: str, fid: str) -> dict:
                 rp = (st.dir / f["report_path"]).resolve()
                 if st.dir.resolve() in rp.parents and rp.exists():
                     report = rp.read_text(errors="replace")
+                    # Always show a Windows-runnable PoC, even for reports written
+                    # by an older run (the hunt process predates the pocfmt fix).
+                    from . import pocfmt
+                    report, _ = pocfmt.patch_markdown(report)
             return {"ok": True, "finding": f, "report": report}
     return {"ok": False, "error": "achado não encontrado"}
 
@@ -216,7 +254,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         if u.path in STATIC:
             name, ctype = STATIC[u.path]
-            return self._send((WEB_DIR / name).read_bytes(), ctype)
+            body = (WEB_DIR / name).read_bytes() if name else b"/* live: sem mock */\n"
+            return self._send(body, ctype)
         if u.path == "/api/overview":
             return self._json(overview())
         if u.path == "/api/state":
@@ -236,6 +275,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if u.path == "/api/knowledge":
             return self._json({"playbook": knowledge.read_playbook(), "stats": knowledge.stats_summary(),
                                "lessons": knowledge.all_lessons(200)})
+        if u.path == "/api/queue":
+            return self._json(queue_state())
         if u.path == "/api/events":
             return self._sse(q.get("target"))
         return self._json({"error": "not found"}, 404)

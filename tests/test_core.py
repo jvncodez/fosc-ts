@@ -241,7 +241,13 @@ class ViewerGuardTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertIn("targets", json.loads(body))
         self.assertEqual(self._req("/")[0], 200)
-        self.assertEqual(self._req("/app.js")[0], 200)
+        from fosc import webview
+        js = "/js/app.js" if "/js/app.js" in webview.STATIC else "/app.js"
+        self.assertEqual(self._req(js)[0], 200)
+        if "/js/mock.js" in webview.STATIC:   # new FOSC/TS front: demo mock is OFF when served live
+            code, body = self._req("/js/mock.js")
+            self.assertEqual(code, 200)
+            self.assertNotIn(b"FOSC_MOCK", body)
 
     def test_bad_host_rejected(self):
         self.assertEqual(self._req("/api/overview", headers={"Host": "evil.test"})[0], 403)
@@ -910,10 +916,365 @@ class ToolKillAndRateTests(unittest.TestCase):
             toolrunner.HOLD.clear()
 
     def test_every_target_touching_tool_is_rate_limited(self):
-        import pathlib
+        import pathlib, tempfile
         src = pathlib.Path("fosc/recon.py").read_text()
         for tool, flag in (("httpx", '"-rl"'), ("katana", '"-rl"'), ("feroxbuster", '"--rate-limit"'),
                            ("ffuf", '"-rate"'), ("nuclei", '"-rl"')):
             i = src.index(f'["{tool}",')
             self.assertIn(flag, src[i:i + 400], tool)
         self.assertNotIn('"-t", "40"', src)
+
+
+class AdaptiveRateTests(unittest.TestCase):
+    """Per-host budget: adapts to latency, shared across concurrent tools."""
+
+    def test_aimd_halves_on_failure_and_grows_on_health(self):
+        from fosc.ratectl import HostRate
+        r = HostRate(start=20, lo=3, hi=60, step=5)
+        self.assertEqual(r.observe(True, 100), 25)        # healthy -> +step
+        self.assertEqual(r.observe(False, None), 12)       # failure -> halve
+        self.assertEqual(r.observe(True, 120), 17)         # recover -> +step
+        for _ in range(50):
+            r.observe(False, None)
+        self.assertEqual(r.rate, 3)                         # never below floor
+
+    def test_slow_latency_backs_off(self):
+        from fosc.ratectl import HostRate
+        r = HostRate(start=40, lo=3, hi=60, step=5)
+        for _ in range(5):
+            r.observe(True, 80)                            # establish a fast baseline
+        fast = r.rate
+        r.observe(True, 5000)                              # a sudden 5s response = slow
+        self.assertLess(r.rate, fast)
+
+    def test_concurrent_tools_split_one_host_budget(self):
+        from fosc.ratectl import _Registry
+        reg = _Registry()
+        reg.host("h").rate = 30
+        # tools that expect company (parts=2, as content/nuclei pass) split the budget
+        with reg.share("h", parts=2) as (r1, _):
+            with reg.share("h", parts=2) as (r2, _):
+                self.assertLessEqual(r1 + r2, 30)          # together never exceed the host budget
+                self.assertGreaterEqual(min(r1, r2), 1)
+        # a lone tool (parts=1) may use the whole budget
+        with reg.share("h") as (r1, _):
+            self.assertEqual(r1, 30)
+
+    def test_budget_is_per_host(self):
+        from fosc.ratectl import _Registry
+        reg = _Registry()
+        reg.observe("a.com", False, None)
+        self.assertNotEqual(reg.host("a.com").rate, reg.host("b.com").rate)
+
+
+class ProgressiveReconTests(unittest.TestCase):
+    """Fast phase unblocks the hunt; background stages feed the queue."""
+
+    def test_background_recon_drains_new_endpoints(self):
+        import time
+        from fosc import recon
+        hosts = [{"url": "https://t.test", "tech": [], "status": 200, "title": None}]
+        surface = {"hosts": hosts, "items": [], "js": [], "nuclei": [], "urls": []}
+        import pathlib, tempfile
+        cache = pathlib.Path(tempfile.mkdtemp()) / "surface.json"
+        bg = recon.BackgroundRecon.__new__(recon.BackgroundRecon)
+        # drive the pure merge logic without spawning tools
+        bg.target = "https://t.test"; bg.surface = surface; bg.cache = cache
+        bg._lock = __import__("threading").Lock(); bg._known = set(); bg._urls = set()
+        bg._pending = []; bg._hits = []; bg.stats = {}
+        bg._add_urls("content", {"https://t.test/api/users", "https://t.test/api/orders"})
+        new, hits = bg.drain()
+        self.assertEqual(len(new), 2)
+        self.assertEqual(bg.drain()[0], [])                # drain is one-shot
+
+    def test_cache_ttl_reused_then_expired(self):
+        import time, os
+        from fosc import recon, config
+        import pathlib, tempfile
+        d = pathlib.Path(tempfile.mkdtemp())
+        cache = d / "surface.json"
+        cache.write_text(json.dumps({"items": [{"pattern": "x"}], "hosts": [], "js": [], "nuclei": []}))
+        self.assertTrue(recon._cache_fresh(cache))
+        old = time.time() - config.RECON_CACHE_TTL - 10
+        os.utime(cache, (old, old))
+        self.assertFalse(recon._cache_fresh(cache))
+
+    def test_attach_hits_is_idempotent(self):
+        from fosc.recon import attach_hits
+        items = [{"pattern": "h/api/x", "url": "https://h/api/x", "nuclei": []}]
+        hit = {"matched": "https://h/api/x", "template": "t", "severity": "high"}
+        attach_hits(items, [hit]); attach_hits(items, [hit])
+        self.assertEqual(len(items[0]["nuclei"]), 1)
+
+
+class _FakeSqs:
+    """Minimal in-memory SQS FIFO: enough to test SqsQueue without boto3/AWS."""
+    def __init__(self):
+        self.msgs = []           # (body, group, dedup, receipt, visible_until, inflight_group)
+        self._n = 0
+        self.deleted = []
+    def send_message(self, QueueUrl, MessageBody, MessageGroupId, MessageDeduplicationId):
+        if any(m["dedup"] == MessageDeduplicationId for m in self.msgs):
+            return {}
+        self._n += 1
+        self.msgs.append({"body": MessageBody, "group": MessageGroupId, "dedup": MessageDeduplicationId,
+                          "receipt": f"r{self._n}", "inflight": False})
+        return {"MessageId": str(self._n)}
+    def receive_message(self, QueueUrl, MaxNumberOfMessages=1, WaitTimeSeconds=0, VisibilityTimeout=0):
+        out, groups_inflight = [], {m["group"] for m in self.msgs if m["inflight"]}
+        for m in self.msgs:
+            if len(out) >= MaxNumberOfMessages:
+                break
+            if m["inflight"] or m["group"] in groups_inflight:
+                continue
+            m["inflight"] = True
+            groups_inflight.add(m["group"])
+            out.append({"Body": m["body"], "ReceiptHandle": m["receipt"]})
+        return {"Messages": out}
+    def delete_message(self, QueueUrl, ReceiptHandle):
+        self.msgs = [m for m in self.msgs if m["receipt"] != ReceiptHandle]
+        self.deleted.append(ReceiptHandle)
+
+
+class JobQueueTests(unittest.TestCase):
+    def _db(self):
+        import tempfile, pathlib
+        return pathlib.Path(tempfile.mkdtemp()) / "q.db"
+
+    def test_one_target_one_campaign(self):
+        from fosc.jobqueue import LocalQueue
+        q = LocalQueue(store_path=self._db())
+        j1, c1 = q.enqueue("https://x.com/#/")
+        j2, c2 = q.enqueue("https://x.com")           # same target after normalization
+        self.assertTrue(c1)
+        self.assertFalse(c2)
+        self.assertEqual(j1["job_id"], j2["job_id"])
+
+    def test_lease_respects_global_cap(self):
+        from fosc.jobqueue import LocalQueue
+        q = LocalQueue(store_path=self._db())
+        for i in range(5):
+            q.enqueue(f"https://t{i}.com")
+        leased = q.lease(max_jobs=10, cap=2)
+        self.assertEqual(len(leased), 2)
+        self.assertEqual(q.running_count(), 2)
+        self.assertEqual(len(q.lease(10, cap=2)), 0)   # cap reached
+        q.complete(leased[0]["job_id"])
+        self.assertEqual(len(q.lease(10, cap=2)), 1)   # a slot freed
+
+    def test_snapshot_positions(self):
+        from fosc.jobqueue import LocalQueue
+        q = LocalQueue(store_path=self._db())
+        q.enqueue("https://a.com", priority=5)
+        q.enqueue("https://b.com", priority=1)         # higher priority -> position 1
+        snap = q.snapshot()
+        first = [j for j in snap if j["status"] == "queued"][0]
+        self.assertEqual(first["target"], "https://b.com")
+        self.assertEqual(first["position"], 1)
+
+    def test_sqs_enqueue_lease_complete_with_fake_client(self):
+        from fosc.jobqueue import SqsQueue
+        fake = _FakeSqs()
+        q = SqsQueue(queue_url="http://q", client=fake, store_path=self._db())
+        job, created = q.enqueue("https://x.com/#/")
+        self.assertTrue(created)
+        self.assertEqual(len(fake.msgs), 1)
+        _, dup = q.enqueue("https://x.com")            # one target, one campaign -> no 2nd msg
+        self.assertFalse(dup)
+        self.assertEqual(len(fake.msgs), 1)
+        leased = q.lease(max_jobs=10, cap=5)
+        self.assertEqual(len(leased), 1)
+        q.complete(leased[0]["job_id"], True, receipt=leased[0]["_receipt"])
+        self.assertEqual(fake.deleted, [leased[0]["_receipt"]])
+
+    def test_sqs_fifo_one_inflight_per_target(self):
+        from fosc.jobqueue import SqsQueue, _Store
+        fake = _FakeSqs()
+        db = self._db()
+        q = SqsQueue(queue_url="http://q", client=fake, store_path=db)
+        q.enqueue("https://x.com")
+        first = q.lease(10, cap=5)
+        # same target already in flight in SQS -> second lease yields nothing new for it
+        self.assertEqual(len(first), 1)
+        self.assertEqual(len(q.lease(10, cap=5)), 0)
+
+    def test_get_queue_selects_backend(self):
+        from fosc import config, jobqueue
+        old = config.SQS_URL
+        try:
+            config.SQS_URL = ""
+            self.assertEqual(jobqueue.get_queue(store_path=self._db()).kind, "local")
+            config.SQS_URL = "http://q"
+            self.assertEqual(jobqueue.get_queue(client=_FakeSqs(), store_path=self._db()).kind, "sqs")
+        finally:
+            config.SQS_URL = old
+
+
+class DispatcherTests(unittest.TestCase):
+    def test_launches_up_to_cap_then_frees(self):
+        import tempfile, pathlib, threading
+        from fosc.jobqueue import LocalQueue
+        from fosc.dispatcher import Dispatcher
+        q = LocalQueue(store_path=pathlib.Path(tempfile.mkdtemp()) / "q.db")
+        for i in range(4):
+            q.enqueue(f"https://t{i}.com")
+        gate = threading.Event()
+        launched = []
+        # patch the module-level launcher to not spawn real processes
+        import fosc.dispatcher as dmod
+        orig = dmod._run_job
+        def fake_run(queue, job, on_event=None):
+            launched.append(job["target"]); gate.wait(2); queue.complete(job["job_id"], True)
+        dmod._run_job = fake_run
+        try:
+            d = Dispatcher(queue=q, max_hunts=2)
+            self.assertEqual(d.tick(), 2)      # cap
+            self.assertEqual(d.tick(), 0)      # full
+            gate.set()
+            import time as _t; _t.sleep(0.2)
+            self.assertGreaterEqual(d.tick(), 1)  # slots freed
+        finally:
+            dmod._run_job = orig
+        self.assertGreaterEqual(len(launched), 2)
+
+
+class PocWindowsTests(unittest.TestCase):
+    """A bash curl PoC must also run byte-identically in Windows cmd.exe
+    (the migbot SQLi report failed to reproduce only because of cmd quoting)."""
+
+    def _cmd_body(self, cmd_curl: str) -> str:
+        """Simulate how cmd.exe hands the -d argument to curl: outer "..." is
+        stripped and \\" becomes "; single quotes are literal."""
+        import re
+        m = re.search(r'-d "((?:[^"\\]|\\.)*)"', cmd_curl)
+        self.assertIsNotNone(m, cmd_curl)
+        return m.group(1).replace('\\"', '"')
+
+    def test_sqli_login_body_is_preserved_for_cmd(self):
+        from fosc.pocfmt import to_cmd
+        bash = ('curl -s -X POST https://t/rest/user/login '
+                "-H 'Content-Type: application/json' "
+                "-d '{\"email\":\"'\"'\"' or 1=1--\",\"password\":\"x\"}'")
+        cmd = to_cmd(bash)
+        self.assertIsNotNone(cmd)
+        self.assertNotIn("'\"'\"'", cmd)                       # no bash escape left
+        self.assertEqual(self._cmd_body(cmd), '{"email":"\' or 1=1--","password":"x"}')
+
+    def test_header_single_quotes_become_double(self):
+        from fosc.pocfmt import to_cmd
+        cmd = to_cmd("curl -H 'Content-Type: application/json' https://t")
+        self.assertIn('"Content-Type: application/json"', cmd)
+
+    def test_plain_curl_needs_no_conversion(self):
+        from fosc.pocfmt import to_cmd
+        self.assertIsNone(to_cmd("curl https://t/api/x"))
+
+    def test_report_blocks_include_windows_variant(self):
+        from fosc.pocfmt import blocks
+        md = "\n".join(blocks("curl -d '{\"a\":\"'\"'\"'b\"}' https://t"))
+        self.assertIn("```bash", md)
+        self.assertIn("cmd.exe", md)
+        self.assertIn("```bat", md)
+
+
+class PocReportPatchTests(unittest.TestCase):
+    """Reports already on disk (written by an older run) must gain a Windows PoC."""
+
+    def test_patch_markdown_adds_windows_block_once(self):
+        from fosc.pocfmt import patch_markdown
+        md = ("## Steps\n\n```bash\ncurl -d '{\"email\":\"'\"'\"'x\"}' https://t\n```\n\n"
+              "Expected evidence: `ok`\n")
+        out, changed = patch_markdown(md)
+        self.assertTrue(changed)
+        self.assertIn("_Windows (cmd.exe):_", out)
+        self.assertIn("```bat", out)
+        again, changed2 = patch_markdown(out)      # idempotent
+        self.assertFalse(changed2)
+        self.assertEqual(again.count("```bat"), 1)
+
+    def test_patch_skips_portable_curl(self):
+        from fosc.pocfmt import patch_markdown
+        md = "```bash\ncurl https://t/api/x\n```\n"
+        _, changed = patch_markdown(md)
+        self.assertFalse(changed)
+
+    def test_patch_reports_walks_run_dir(self):
+        import tempfile, pathlib
+        d = pathlib.Path(tempfile.mkdtemp())
+        rep = d / "pocs" / "abc"
+        rep.mkdir(parents=True)
+        (rep / "report.md").write_text("```bash\ncurl -d '{\"a\":\"'\"'\"'b\"}' https://t\n```\n")
+        from fosc.pocfmt import patch_reports
+        scanned, patched = patch_reports(d)
+        self.assertEqual((scanned, patched), (1, 1))
+        self.assertIn("cmd.exe", (rep / "report.md").read_text())
+
+
+def _parecer(cadeira, *, ok=True, veto=False, sev=None, conf=None, risco="baixo",
+             lgpd=None, pilares=None, motivo=None):
+    return {"cadeira": cadeira, "nome": cadeira, "ok": ok, "parecer": "parecer",
+            "risco": risco, "severidade_sugerida": sev, "confianca": conf,
+            "veto": veto, "motivo_veto": motivo, "lgpd_dado_pessoal": lgpd,
+            "cia_pilares": pilares, "cost": 0.01}
+
+
+class CouncilDecideTests(unittest.TestCase):
+    """decidir() é pura e determinística: veto, reclassificação, piso de confiança."""
+
+    def test_approved_when_no_veto(self):
+        from fosc.council import decidir
+        d = decidir([_parecer("lgpd"), _parecer("corporativo", sev="high")], "medium", "high")
+        self.assertTrue(d["aprovado"])
+        self.assertEqual(d["cadeiras_ok"], 2)
+        self.assertEqual(d["motivos_veto"], [])
+
+    def test_any_veto_blocks(self):
+        from fosc.council import decidir
+        d = decidir([_parecer("corporativo", sev="high"),
+                     _parecer("governanca", veto=True, motivo="fora de escopo")], "high", "high")
+        self.assertFalse(d["aprovado"])
+        self.assertEqual([v["cadeira"] for v in d["motivos_veto"]], ["governanca"])
+        self.assertEqual(d["motivos_veto"][0]["motivo"], "fora de escopo")
+
+    def test_corporate_seat_sets_severity(self):
+        from fosc.council import decidir
+        # corporativa rebaixa para low mesmo com outra cadeira sugerindo critical
+        d = decidir([_parecer("cia", sev="critical"),
+                     _parecer("corporativo", sev="low")], "high", "medium")
+        self.assertEqual(d["severidade_final"], "low")
+
+    def test_highest_suggested_when_no_corporate(self):
+        from fosc.council import decidir
+        d = decidir([_parecer("cia", sev="medium"), _parecer("usuario", sev="high")], "low", "medium")
+        self.assertEqual(d["severidade_final"], "high")
+
+    def test_severity_falls_back_to_current(self):
+        from fosc.council import decidir
+        d = decidir([_parecer("cia"), _parecer("usuario")], "high", "medium")
+        self.assertEqual(d["severidade_final"], "high")
+
+    def test_confidence_floor_is_most_conservative(self):
+        from fosc.council import decidir
+        d = decidir([_parecer("cia", conf="alta"), _parecer("corporativo", conf="baixa")], "high", "high")
+        self.assertEqual(d["confianca_final"], "low")
+
+    def test_lgpd_and_cia_aggregated(self):
+        from fosc.council import decidir
+        d = decidir([_parecer("lgpd", lgpd=True),
+                     _parecer("cia", pilares=["confidencialidade", "integridade"])], "medium", "medium")
+        self.assertTrue(d["lgpd_dado_pessoal"])
+        self.assertEqual(d["cia_pilares"], ["confidencialidade", "integridade"])
+        self.assertEqual(d["risco_corporativo"], "baixo")
+
+    def test_risk_takes_maximum(self):
+        from fosc.council import decidir
+        d = decidir([_parecer("cia", risco="baixo"), _parecer("corporativo", risco="critico")], "medium", "medium")
+        self.assertEqual(d["risco_corporativo"], "critico")
+
+    def test_failed_seat_vote_ignored(self):
+        from fosc.council import decidir
+        # uma cadeira que não respondeu (ok=False) não conta veto nem severidade
+        d = decidir([_parecer("corporativo", sev="high"),
+                     _parecer("governanca", ok=False, veto=True)], "medium", "medium")
+        self.assertTrue(d["aprovado"])
+        self.assertEqual(d["cadeiras_ok"], 1)

@@ -12,13 +12,13 @@ import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from . import audit, claude_runner, config, health, knowledge, models, net, plan, toolrunner
+from . import audit, claude_runner, config, council, health, knowledge, models, net, plan, ratectl, toolrunner
 from .notify import notify_finding
 from .privesc import attempt_privesc
 from .prompts import (CONSOLIDATE_SCHEMA, CONSOLIDATE_SYSTEM, HUNT_SCHEMA, HUNT_SYSTEM,
                       build_consolidate_prompt, build_hunt_prompt)
 from .rank import rank, suggest_classes
-from .recon import load_or_build, item_id, route_pattern, target_host
+from .recon import attach_hits, item_id, route_pattern, start_progressive, target_host
 from .scope import Scope
 from .scope_proxy import ScopeProxy
 from .authz import ApprovalStore, require, operator
@@ -146,6 +146,42 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
                                "shell_howto": f.get("shell_howto"),
                                "mitre": mitre.techniques(review.get("vuln_class") or cls),
                                "review": review.get("reason"), "item_id": item_id(item)}
+
+                    # O Conselho: 5 cadeiras (LGPD, CIA, usuário, corporativo,
+                    # governança) revisam antes do orquestrador. Veto suprime;
+                    # senão, reclassifica severidade/confiança (nível corporativo).
+                    if config.COUNCIL_ENABLED:
+                        decisao = council.revisar(finding, item, scope_note, state.task_dir(item),
+                                                  on_activity=act)
+                        state.add_cost(decisao.get("custo", 0))
+                        res["cost"] = res.get("cost", cost) + decisao.get("custo", 0)
+                        finding["council"] = decisao
+                        if audit_log:
+                            audit_log.record("council", actor=operator(), minimize=True,
+                                             url=endpoint_url, aprovado=decisao["aprovado"],
+                                             severidade=decisao["severidade_final"],
+                                             risco_corporativo=decisao["risco_corporativo"],
+                                             lgpd=decisao["lgpd_dado_pessoal"],
+                                             vetos=[v["cadeira"] for v in decisao["motivos_veto"]])
+                        if not decisao["aprovado"]:
+                            res["verdict"] = "rejected"
+                            res["review"] = ("conselho vetou: " +
+                                             "; ".join(f"{v['cadeira']}: {v['motivo']}"
+                                                       for v in decisao["motivos_veto"]))[:400]
+                            state.activity(item, res["review"], kind="system")
+                            knowledge.record_event(target, item, "rejected",
+                                                   res.get("vuln_class") or cls, tech)
+                            if audit_log:
+                                audit_log.record("task", actor=operator(), minimize=True,
+                                                 url=item.get("url"), model=run.get("model"),
+                                                 status=run["status"], verdict="rejected",
+                                                 cost=res.get("cost"), commands=commands[:50])
+                            return res
+                        finding["severity"] = decisao["severidade_final"]
+                        finding["confidence"] = decisao["confianca_final"]
+                        finding["lgpd"] = decisao["lgpd_dado_pessoal"]
+                        finding["cia_pilares"] = decisao["cia_pilares"]
+                        finding["risco_corporativo"] = decisao["risco_corporativo"]
                     finding = state.add_confirmed(finding)
                     if audit_log:
                         audit_log.record("finding", actor=operator(), minimize=True,
@@ -325,14 +361,27 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
         notify.notify_event("recovered", target, detail)
 
     probe_url = target if target.startswith(("http://", "https://")) else f"https://{target}"
+    rate_host = target_host(target)
+
+    def _on_sample(ok, ms):
+        # Adaptive budget: the same probe that guards the breaker steers the rate.
+        before = ratectl.REGISTRY.host(rate_host).rate
+        after = ratectl.observe(rate_host, ok, ms)
+        if after != before:
+            state.write_meta(recon_rate=after)
+            log.record("rate_change", host=rate_host, rate=after, previous=before, latency_ms=int(ms), ok=ok)
+            if after < before:
+                state.activity(None, f"taxa reduzida para {after} req/s (alvo {'falhou' if not ok else f'lento: {int(ms)} ms'})",
+                               kind="system")
+
     watchdog = None
     if config.HEALTH_CHECK:
-        watchdog = health.TargetHealth(probe_url, _on_trip, _on_recover)
+        watchdog = health.TargetHealth(probe_url, _on_trip, _on_recover, on_sample=_on_sample)
         watchdog.start()
         log.record("health_start", url=probe_url, interval=config.HEALTH_INTERVAL, fails=config.HEALTH_FAILS,
-                   recon_rate=config.RECON_RATE, recon_threads=config.RECON_THREADS)
-        out.info(f"disjuntor ativo: {probe_url} a cada {config.HEALTH_INTERVAL}s · "
-                 f"recon limitado a {config.RECON_RATE} req/s, {config.RECON_THREADS} conexões")
+                   rate_start=config.RATE_START, rate_min=config.RATE_MIN, rate_max=config.RATE_MAX)
+        out.info(f"disjuntor ativo: {probe_url} a cada {config.HEALTH_INTERVAL}s · taxa adaptativa por host "
+                 f"{config.RATE_MIN}–{config.RATE_MAX} req/s (início {config.RATE_START})")
 
     # Telegram remote control: approve/deny the gate and /halt from the phone.
     approvals = ApprovalStore(state.approvals_path)
@@ -356,12 +405,44 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
             state.write_meta(round=round_no, status="recon", last_round_started_at=time.time())
             out.info(f"round {round_no}: recon")
             state.activity(None, f"rodada {round_no}: recon" + (" (mais fundo)" if round_no > 1 else ""), kind="system")
-            surface = load_or_build(target, state.dir, fresh=(fresh and round_no == 1) or (continuous and round_no > 1),
-                                    nuclei=nuclei, content=content)
+            # Progressive recon: the fast phase returns now; archives/brute-force/nuclei
+            # keep running in the background and feed the queue during the hunt.
+            surface, bg = start_progressive(target, state.dir,
+                                            fresh=(fresh and round_no == 1) or (continuous and round_no > 1),
+                                            nuclei=nuclei, content=content)
             stats = knowledge.class_stats()
             todo = [i for i in rank(surface.get("items", []), stats) if not state.is_done(i)]
             if max_items:
                 todo = todo[:max_items]
+            queued_ids = {item_id(i) for i in todo}
+
+            def _pull_bg(queue: list) -> int:
+                """Merge endpoints the background recon found since last call."""
+                if not bg:
+                    return 0
+                new, hits = bg.drain()
+                if hits:
+                    attach_hits(queue, hits)
+                room = (max_items - len(queued_ids)) if max_items else None
+                add = [i for i in new if item_id(i) not in queued_ids and not state.is_done(i)]
+                if room is not None:
+                    add = add[:max(0, room)]
+                if add or hits:
+                    queue[:] = rank(queue + add, stats)
+                for i in add:
+                    queued_ids.add(item_id(i))
+                    surface["items"].append(i)
+                if add:
+                    state.write_meta(round_total=len(queued_ids))
+                    state.activity(None, f"recon de fundo: +{len(add)} endpoint(s) na fila "
+                                         f"(total {len(queued_ids)})", kind="system")
+                return len(add)
+
+            # Nothing from the fast phase yet (e.g. bare API): wait for the background.
+            while not todo and bg and bg.running and not state.should_stop():
+                time.sleep(3)
+                _pull_bg(todo)
+            _pull_bg(todo)
 
             if not todo:
                 conf = len(state.confirmed())
@@ -382,7 +463,8 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
             if config.AUTHZ_HUNT_GATE and not hunt_authorized:
                 out.stop_live()
                 dec = require(approvals, "active-hunt", scope.label(),
-                              f"iniciar teste ATIVO de {len(todo)} endpoint(s) no escopo autorizado",
+                              f"iniciar teste ATIVO de {len(todo)} endpoint(s) no escopo autorizado"
+                              + (" (+ os que o recon de fundo descobrir, mesmo escopo)" if bg else ""),
                               on_notice=lambda m: (state.activity(None, m, kind="system"), out.warn(m)),
                               on_pending=lambda rid, a, t, c: notify.notify_approval(t, a, c, rid))
                 out.start_live()
@@ -397,14 +479,16 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
                 state.activity(None, f"teste ativo AUTORIZADO por {dec.approver or 'operador'} (id {dec.id})", kind="system")
                 out.info(f"teste ativo autorizado por {dec.approver or 'operador'}")
 
-            state.write_meta(status="running", round_total=len(todo), round_done=0)
-            state.activity(None, f"round {round_no}: {len(todo)} endpoint(s) queued", kind="system")
+            state.write_meta(status="running", round_total=len(queued_ids), round_done=0)
+            state.activity(None, f"round {round_no}: {len(todo)} endpoint(s) queued"
+                                 + (" · recon de fundo em andamento" if bg else ""), kind="system")
             out.round_start(round_no, len(todo))
             queue = list(todo)
             running = {}
             finished = 0
             with ThreadPoolExecutor(max_workers=workers) as ex:
-                while queue or running:
+                while queue or running or (bg and bg.running and not state.should_stop()):
+                    _pull_bg(queue)
                     stop = state.should_stop()
                     paused = state.is_paused()
                     if not paused and toolrunner.HOLD.is_set() and not state.should_halt():
@@ -436,7 +520,7 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
                         finished += 1
                         state.write_meta(round_done=finished)
                         state.activity(item, f"{res['verdict']}: {(res.get('summary') or '')[:160]}", kind="result")
-                        out.result(item, res, finished, len(todo))
+                        out.result(item, res, finished, len(queued_ids))
                         # no branch on verdict: confirmed findings are logged and the loop keeps going
             if state.should_stop():
                 final_status = "stopped"
@@ -463,6 +547,7 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
         halted.set()
         if watchdog:
             watchdog.stop()
+        toolrunner.kill_tools()   # background recon still running on stop/halt
         bot.stop()
         if proxy:
             claude_runner.PROXY_URL = None

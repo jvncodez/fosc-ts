@@ -248,6 +248,13 @@ input[type=search] { min-width: 240px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; word-break: break-word; }
 .section-t { font-size: 13px; color: var(--text); font-weight: 600; margin: 20px 0 8px; }
+.council-verdict { border-radius: var(--radius-sm); padding: 10px 14px; font-size: 14px; margin: 0 0 16px; border: 1px solid var(--border); }
+.council-verdict.ap { background: #EAF7EE; border-color: #BFE3C9; color: #1C6B35; }
+.council-verdict.veto { background: #FDECEC; border-color: #F3C2C2; color: #A42121; }
+.parecer { border: 1px solid var(--border); border-left: 3px solid var(--bb-azul); border-radius: var(--radius-sm); padding: 10px 14px; margin: 0 0 10px; }
+.parecer.veto { border-left-color: #A42121; }
+.parecer-h { font-size: 13px; margin: 0 0 4px; }
+.tag-veto { background: #FDECEC; color: #A42121; border: 1px solid #F3C2C2; border-radius: 4px; font-size: 11px; padding: 1px 6px; font-weight: 600; }
 .codebox { position: relative; }
 .codebox pre, pre.log { margin: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; font: 12.5px/1.6 var(--mono); color: var(--text); overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
 pre.log { max-height: 62vh; overflow-y: auto; }
