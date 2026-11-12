@@ -1,0 +1,10 @@
+# Nunca comitar estado nem segredos do Terraform.
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+crash.log
+override.tf
+override.tf.json

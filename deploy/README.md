@@ -4,6 +4,11 @@ Execução **headless** do agente na AWS, com **estado persistente**, **segredos
 do repo** e **aprovação humana remota**. O modelo é o Amazon Bedrock; a governança
 (escopo estrito na rede, human-in-the-loop, trilha de auditoria) vai junto.
 
+> ⭐ **Caminho recomendado:** infra como código em [`terraform/`](terraform/README.md)
+> — ECR, ECS/Fargate, EFS, SQS, Secrets Manager, IAM mínimo e egress fechado (VPC
+> endpoints + SG) em um módulo reproduzível (`init/plan/apply`, com `destroy`). Os
+> JSONs soltos e os passos `aws ...` abaixo continuam válidos como referência manual.
+
 ## Instalação rápida via Docker (nada na máquina além da imagem)
 
 ```bash

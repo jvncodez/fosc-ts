@@ -1,0 +1,31 @@
+# Copie p/ terraform.tfvars e ajuste. NÃO comite terraform.tfvars (está no .gitignore).
+
+aws_region = "us-east-1"
+
+# VPC existente + subnets (de preferência privadas, com os VPC endpoints criados aqui).
+vpc_id             = "vpc-xxxxxxxx"
+private_subnet_ids = ["subnet-aaaa", "subnet-bbbb"]
+
+# IP(s) do ALVO AUTORIZADO — o egress 80/443 é liberado SÓ p/ estes.
+allowed_target_cidrs = ["44.227.89.148/32"]
+
+# Escopo do agente.
+target_url = "https://1.migbot.com.br/#/"
+fosc_args  = "--continuous --interval 3600"
+max_hunts  = 5
+
+# Egress fechado via VPC endpoints (recomendado). false = fallback com NAT+internet.
+create_vpc_endpoints = true
+assign_public_ip     = false
+
+# O serviço começa parado; suba quando quiser rodar o worker da fila.
+desired_count = 0
+
+# Bedrock — confira os inference-profile ids liberados na sua região/conta.
+# bedrock_sonnet = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+# bedrock_opus   = "us.anthropic.claude-opus-4-1-20250805-v1:0"
+# bedrock_haiku  = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+# Telegram — NÃO ponha valores reais aqui. Passe na hora do apply:
+#   TF_VAR_telegram_token=... TF_VAR_telegram_chat_id=... terraform apply
+# ou deixe vazio e preencha o segredo pelo console depois.
