@@ -5,6 +5,7 @@ findings · audit.
 Camada só de leitura/tradução — NÃO altera a engine de caça. O front não muda de
 estrutura: consome exatamente os mesmos campos do mock, agora com dados reais.
 """
+import hashlib
 import json
 import os
 import signal
@@ -60,10 +61,14 @@ def _conf_num(f: dict) -> float:
 
 # --------- as 7 coleções do workspace -------------------------------------
 
+def _scope_id(target: str) -> str:
+    return "SCP-" + hashlib.sha1(target.encode()).hexdigest()[:6].upper()
+
+
 def _campaign(st: RunState | None, snap: dict) -> dict:
     if not st:
         return {"id": "—", "name": "Nenhuma campanha", "target": "", "status": "draft",
-                "progress": 0, "startedAt": None, "owner": operator()}
+                "progress": 0, "startedAt": None, "owner": operator(), "scopeId": "—"}
     m = snap["meta"]
     total = snap.get("surface_total") or 0
     done = snap.get("done") or 0
@@ -71,6 +76,7 @@ def _campaign(st: RunState | None, snap: dict) -> dict:
     return {"id": st.target, "name": f"Campanha — {st.target}", "target": st.target,
             "status": _STATUS.get(snap["status"], "running"), "progress": progress,
             "startedAt": _fmt(m.get("started_at")), "owner": operator(),
+            "scopeId": _scope_id(st.target),
             "cost": round(m.get("cost_usd") or 0, 2), "confirmed": snap.get("confirmed_count") or 0}
 
 
