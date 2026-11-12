@@ -1,0 +1,45 @@
+/* Terminal da campanha: registro somente leitura de comandos, com tags de estado. Usa apenas tokens de tokens.css. */
+.status-allowed { color: var(--status-info); background: var(--status-info-tint); }
+.status-blocked { color: var(--status-critical); background: var(--status-critical-tint); }
+
+.term-panel { padding: 0; overflow: hidden; }
+.term-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; background: var(--container-neutral-default); border-bottom: 1px solid var(--border-muted); }
+.term-bar-title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; line-height: 20px; color: var(--text-muted); }
+.term-bar-title svg { width: 18px; height: 18px; color: var(--text-primary); flex: none; }
+.term-bar-title strong { color: var(--text-default); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.term-bar-state { display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 16px; color: var(--text-muted); white-space: nowrap; }
+.term-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border-default); }
+.term-dot.on { background: var(--status-success); animation: term-pulse 1.8s infinite; }
+@keyframes term-pulse { 50% { box-shadow: 0 0 0 4px var(--status-success-tint); } }
+
+.term-body { max-height: 600px; overflow: auto; padding: 0 16px; }
+.term-line { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; gap: 14px; padding: 13px 0; border-top: 1px solid var(--border-muted); }
+.term-line:first-child { border-top: 0; }
+.term-meta { display: grid; gap: 3px; align-content: start; }
+.term-meta time, .term-id { font-size: 12px; line-height: 16px; color: var(--text-muted); }
+.term-main { min-width: 0; display: grid; gap: 6px; }
+.term-cmd { display: flex; align-items: flex-start; gap: 8px; }
+.term-prompt { color: var(--text-primary); font-weight: 700; line-height: 20px; }
+.term-cmd code { font-size: 14px; line-height: 20px; color: var(--text-default); overflow-wrap: anywhere; }
+.term-out { margin: 0; padding: 8px 10px; border-left: 2px solid var(--border-muted); background: var(--container-neutral-default); border-radius: 0 6px 6px 0; font-size: 12px; line-height: 20px; color: var(--text-muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.term-main > small { font-size: 12px; line-height: 16px; color: var(--text-muted); }
+.term-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.term-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+.term-approved .term-out { border-left-color: var(--status-success); }
+.term-pending .term-out { border-left-color: var(--status-warning); }
+.term-allowed .term-out { border-left-color: var(--status-info); }
+.term-blocked .term-out, .term-rejected .term-out, .term-cancelled .term-out { border-left-color: var(--status-critical); }
+.term-blocked .term-cmd code, .term-rejected .term-cmd code, .term-cancelled .term-cmd code { text-decoration: line-through; color: var(--text-muted); }
+
+.term-foot { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border-muted); background: var(--container-neutral-default); font-size: 12px; line-height: 16px; color: var(--text-muted); }
+.term-foot svg { width: 14px; height: 14px; color: var(--text-primary); flex: none; }
+.term-filters { flex-wrap: wrap; }
+
+.mono-term, .term-cmd code, .term-prompt, .term-out, .term-meta time, .term-id { font-family: var(--font-mono) !important; font-variant-ligatures: none; }
+
+@media (max-width: 850px) {
+  .term-line { grid-template-columns: 1fr; gap: 8px; }
+  .term-meta { display: flex; gap: 10px; }
+  .term-side { flex-direction: row; align-items: center; justify-content: space-between; }
+}

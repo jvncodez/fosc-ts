@@ -64,11 +64,33 @@ web/
 └── assets/logo.svg # marca FOSC/TS provisória (trocar pelo logo final)
 ```
 
+## Identidade Hacka/TS + uniDS BBTS (2026)
+
+O frontend aplica o `hackats-bbts-design-system.md`: tokens semânticos uniDS (azul
+`#465EFF` para ações, amarelo `#FCFC30` como marca) e os acentos de assinatura
+Hacka/TS (`#146EF5` e `#FF6384`, usados só em grafismos de marca — cantoneiras de
+mira no card de escopo, divisores "morse" ao lado de "Atividade ao vivo" e a barra
+diagonal coral no logotipo `FOSC/TS`).
+
+Tipografia dividida em 3 famílias (ver `--font-display`, `--font-body`,
+`--font-mono` no topo de `css/app.css`), com fallback via Google Fonts
+(Montserrat/Plus Jakarta Sans para títulos e KPIs, Inter para corpo, JetBrains
+Mono para logs/endpoints/hashes) — as fontes institucionais `BancoDoBrasil
+Titulos/Textos` entram automaticamente se estiverem instaladas.
+
+A faixa de **Governança Ativa** (logo abaixo dos KPIs) mostra o escopo travado
+(requisições permitidas × bloqueadas pelo proxy), o selo de trilha de auditoria
+(cadeia SHA-256 íntegra/violada) e a contagem de aprovações pendentes. Quando há
+uma aprovação pendente (human-in-the-loop), um card amarelo elétrico aparece com
+botões **Aprovar/Negar**. O botão vermelho **HALT** no cabeçalho da caçada é
+separado do **Parar** comum e para tudo imediatamente.
+
 ## Ideias para evoluir
 
-- [ ] Logo definitivo, tipografia e ícones no tom BB.
-- [ ] Tela de **Aprovações** (human-in-the-loop) e de **Trilha de auditoria** (selo íntegra ✓ / violada ✗, `scope_block`).
-- [ ] Botão de **halt de emergência** bem visível.
+- [x] Tela/faixa de **Governança** (escopo, HITL, trilha de auditoria) e botão de **HALT**.
+- [x] Tipografia e paleta alinhadas ao `hackats-bbts-design-system.md`.
+- [ ] Logo definitivo e ícones no tom BB/Hacka-TS.
+- [ ] Linha do tempo de verificação adversarial nos achados (Descoberta → Refutação → Prova).
 - [ ] Responsivo/mobile, microinterações.
 
 ## Integração com o agente

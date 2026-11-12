@@ -1,0 +1,103 @@
+/* Tokens extraídos do tema oficial BBTS Light + assinatura Hacka/TS. */
+:root {
+  --color-brand-blue-500: #465EFF;
+  --color-brand-yellow-300: #FCFC30;
+  --color-brand-green-500: #00CCB9;
+  --hacka-blue: #146EF5;
+  --hacka-coral: #FF6384;
+  --hacka-coral-hover: #E14B6C;
+  --bb-yellow: #FCFC30;
+
+  --background-default: #FFFFFF;
+  --container-neutral-default: #FAFAFA;
+  --container-neutral-hover: #E4E4E7;
+  --container-neutral-pressed: #D4D4D8;
+  --container-neutral-selected: #DDE9FF;
+  --container-primary-default: #465EFF;
+  --container-primary-hover: #2A30D8;
+  --container-primary-pressed: #262E89;
+  --container-primary-disabled: #DDE9FF;
+  --container-primary-selected: #9CB9FF;
+  --container-primary-tint: #DDE9FF;
+  --container-secondary-default: #FCFC30;
+  --container-secondary-hover: #F9F016;
+  --container-secondary-pressed: #E9D709;
+  --container-secondary-disabled: #FAFEC3;
+  --container-secondary-selected: #FAFE8A;
+  --container-secondary-tint: #FAFEC3;
+
+  --text-default: #09090B;
+  --text-muted: #3F3F46;
+  --text-placeholder: #71717B;
+  --text-disabled: #9F9FA9;
+  --text-primary: #3640F5;
+  --text-secondary: #FCFC30;
+  --text-accent: #0B6C93;
+  --text-success: #14670D;
+  --text-warning: #B74A06;
+  --text-critical: #C80D19;
+  --text-info: #1758B6;
+  --text-decorative: #654EB0;
+  --text-inverted-default: #FAFAFA;
+  --text-inverted-muted: #D4D4D8;
+  --text-on-primary-default: #FAFAFA;
+  --text-on-primary-muted: #D4D4D8;
+  --text-on-secondary-default: #09090B;
+  --text-on-secondary-muted: #3F3F46;
+
+  --status-accent: #144965;
+  --status-accent-tint: #CEF7FF;
+  --status-success: #14670D;
+  --status-success-tint: #D2FFC8;
+  --status-warning: #DD6B02;
+  --status-warning-tint: #FFF1C6;
+  --status-critical: #C80D19;
+  --status-critical-tint: #FFDFE1;
+  --status-info: #194B8F;
+  --status-info-tint: #D9F1FF;
+  --status-decorative: #654EB0;
+  --status-decorative-tint: #E8E5FD;
+  --status-overlay: #18181B;
+  --status-overlay-muted: #3F3F46;
+
+  --border-default: #9F9FA9;
+  --border-muted: #D4D4D8;
+  --border-disabled: #E4E4E7;
+  --border-primary: #3640F5;
+  --border-secondary: #FCFC30;
+  --border-accent: #54DCFC;
+  --border-success: #14670D;
+  --border-warning: #DD6B02;
+  --border-critical: #C80D19;
+  --border-info: #1758B6;
+  --border-decorative: #654EB0;
+
+  --link-default: #3640F5;
+  --link-hover: #252CAE;
+  --link-pressed: #654EB0;
+  --link-disabled: #DDE9FF;
+
+  --button-primary-default: #465EFF;
+  --button-primary-hover: #2A30D8;
+  --button-primary-pressed: #262E89;
+  --button-primary-disabled: #DDE9FF;
+  --button-secondary-default: #FAFAFA;
+  --button-secondary-hover: #DDE9FF;
+  --button-secondary-pressed: #9CB9FF;
+  --button-secondary-disabled: #FAFAFA;
+  --button-critical-default: #C80D19;
+  --button-critical-hover: #88141B;
+  --button-critical-pressed: #4B0408;
+  --button-critical-disabled: #FFDFE1;
+
+  --font-titles: Calibri, sans-serif;
+  --font-texts: Calibri, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", Consolas, monospace;
+
+}
+
+html { color-scheme: light; }
+body { background: var(--background-default); color: var(--text-default); font-family: var(--font-texts); }
+body :where(button,input,select,textarea) { font-family: var(--font-texts); }
+:focus-visible { outline: 3px solid var(--border-primary); outline-offset: 2px; }
+::selection { background: var(--container-primary-tint); color: var(--text-default); }

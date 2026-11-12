@@ -48,11 +48,18 @@
   results.sort((a, b) => b.ts - a.ts);
 
   const lines = [
-    "$ nmap -sV -p 80,443,3000 app-demo.bbts.local", "plano: hipótese IDOR em /api/Users/{n} · parada: 2 ids distintos",
-    "$ ffuf -u https://app-demo.bbts.local/FUZZ -w raft-small-words.txt", "lendo bundle main.js (rotas da API)",
-    "$ curl -s https://app-demo.bbts.local/rest/admin/application-configuration", "proxy de escopo: bloqueado cdn.terceiro.com (fora do escopo)",
-    "$ sqlmap -u 'https://app-demo.bbts.local/rest/products/search?q=a' --batch --level 2", "aprovação humana solicitada: ação sensível (escrita)",
-    "operador aprovou via Telegram", "$ nuclei -u https://app-demo.bbts.local -severity medium,high,critical",
+    "$ nmap -sV -p 80,443,3000 app-demo.bbts.local",
+    "[HIPÓTESE] IDOR em /api/Users/{n} · critério de parada: 2 ids distintos",
+    "$ ffuf -u https://app-demo.bbts.local/FUZZ -w raft-small-words.txt",
+    "lendo bundle main.js (rotas da API)",
+    "$ curl -s https://app-demo.bbts.local/rest/admin/application-configuration",
+    "[BLOQUEADO] cdn.terceiro.com (fora do escopo autorizado)",
+    "$ sqlmap -u 'https://app-demo.bbts.local/rest/products/search?q=a' --batch --level 2",
+    "[APROVAÇÃO] solicitada: ação sensível (escrita) em /rest/user/change-password",
+    "operador aprovou via Telegram",
+    "$ nuclei -u https://app-demo.bbts.local -severity medium,high,critical",
+    "[SCOPE] permitido *.bbts.local · exceto pagamentos.bbts.local",
+    "[OPUS-REVIEW] revisão adversarial iniciada para achado sqli",
   ];
   const activity = [];
   for (let i = 0; i < 24; i++) activity.unshift({ ts: T - 600 + i * 22, msg: lines[i % lines.length], kind: i % 9 === 0 ? "system" : "", url: H + paths[i % paths.length].replace("{n}", 7 + i).replace("{id}", "5267-" + i) });
@@ -102,6 +109,15 @@
     f1: "# SQL injection no login\n\n**Severidade:** crítica (CVSS 9.8) · **MITRE:** T1190\n\n## Passos\n1. POST /rest/user/login com email `' OR 1=1--`\n2. Token do admin é devolvido\n\n## Impacto\nTomada de conta administrativa.\n\n## Correção\nUsar consultas parametrizadas.",
   };
 
+  // ---------------- governança (escopo / HITL / trilha de auditoria / HALT)
+  const governance = {
+    scope: { allowed: 142, blocked: 7 },
+    audit: { intact: true, algorithm: "SHA-256" },
+    approvals_pending: [
+      { id: "ap1", action: "escrita em /rest/user/change-password", url: H + "/rest/user/change-password", target: TARGET },
+    ],
+  };
+
   // ---------------- API fake
   const clone = (o) => JSON.parse(JSON.stringify(o));
   async function api(path, body) {
@@ -113,11 +129,19 @@
         chat.live = { running: true, text: "", activity: ["lendo achados do alvo", "$ curl -s " + H + "/rest/user/whoami"] };
         setTimeout(() => { chat.live = {}; chat.messages.push({ role: "assistant", text: "(modo demo) Resposta de exemplo do agente FOSC/TS.", cost: 0.03 }); }, 2500);
       }
-      if (p === "/api/control" && body.action) state.status = { pause: "paused", resume: "running", stop: "stopped" }[body.action] || state.status;
+      if (p === "/api/control" && body.action) {
+        state.status = { pause: "paused", resume: "running", stop: "stopped", halt: "stopped" }[body.action] || state.status;
+        if (body.action === "halt") { governance.approvals_pending = []; state.activity.unshift({ ts: Date.now() / 1000, msg: "[BLOQUEADO] HALT de emergência acionado pelo operador", kind: "system" }); }
+      }
+      if (p === "/api/approvals/decide") {
+        governance.approvals_pending = governance.approvals_pending.filter((a) => a.id !== body.id);
+        state.activity.unshift({ ts: Date.now() / 1000, msg: `[APROVAÇÃO] ${body.decision === "approve" ? "concedida" : "negada"} pelo operador`, kind: "system" });
+      }
       return { ok: true };
     }
     if (p === "/api/overview") return overview();
     if (p === "/api/state") return clone(state);
+    if (p === "/api/governance") return clone(governance);
     if (p === "/api/finding") { const f = confirmed.find((x) => x.id === u.searchParams.get("id")); return f ? { ok: true, finding: f, report: reports[f.id] || "" } : { ok: false, error: "não encontrado" }; }
     if (p === "/api/log") return { ok: true, hunt: lines.join("\n") + "\n\n(modo demo — log de exemplo)", review: "Revisão adversarial (Opus): tentativa de refutar… não refutado." };
     if (p === "/api/chat") return clone(chat);

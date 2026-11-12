@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" role="img" aria-labelledby="title">
+  <title id="title">FOSC/TS</title>
+  <g fill="#146EF5" font-family="Arial Black, Arial, sans-serif" font-size="168" font-weight="900" letter-spacing="-8">
+    <text x="4" y="158">FOSC</text><text x="565" y="158">TS</text>
+  </g>
+  <path fill="#FF6384" d="M528 19h44l-75 169h-44z"/>
+</svg>

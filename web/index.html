@@ -1,268 +1,81 @@
 <!doctype html>
 <html lang="pt-BR">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FOSC/TS</title>
-<link rel="icon" href="assets/logo.svg">
-<link rel="stylesheet" href="css/app.css">
-</head>
-<body>
-<header class="topbar">
-  <a class="brand" href="#/">
-    <img src="assets/logo.svg" alt="" class="brand-logo">
-    <span class="brand-name">FOSC/TS</span>
-    <span class="brand-tag">Ferramenta Ofensiva de Segurança Cibernética para Tecnologia e Serviços</span>
-  </a>
-  <div class="topbar-right">
-    <div class="side-totals" id="sideTotals"></div>
-    <span class="env" id="modeLabel">Local</span>
-  </div>
-</header>
-
-<div class="app">
-
-  <aside class="sidebar">
-    <button class="btn btn-primary btn-block" id="btnNewHunt"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Nova caçada</button>
-
-    <nav class="side-nav">
-      <a href="#/" data-view="hunts" class="nav-link"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>Caçadas</a>
-      <a href="#/chat" data-view="chat" class="nav-link"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>Conversa</a>
-      <a href="#/queue" data-view="queue" class="nav-link" id="navQueue" hidden><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Fila</a>
-      <a href="#/knowledge" data-view="knowledge" class="nav-link"><svg viewBox="0 0 24 24"><path d="M5 4h10l4 4v12H5z"/><path d="M9 12h6M9 16h6"/></svg>Aprendizado</a>
-      <a href="#/settings" data-view="settings" class="nav-link"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>Configurações</a>
-    </nav>
-
-    <div class="side-label">Alvos</div>
-    <nav class="targets" id="targetList"></nav>
-
-    <div class="side-spacer"></div>
-    <div class="side-foot" id="version">—</div>
-  </aside>
-
-  <main class="main">
-
-    <!-- ============ HUNT VIEW ============ -->
-    <section class="view" id="viewHunt">
-      <div class="empty-state" id="emptyHunt">
-                <h2>Nenhum alvo selecionado</h2>
-        <p>Escolha um alvo na barra lateral ou comece uma caçada nova.</p>
-        <button class="btn btn-primary" id="btnNewHunt2">Nova caçada</button>
-      </div>
-
-      <div id="huntContent" hidden>
-        <header class="page-head">
-          <div>
-            <div class="eyebrow">Caçadas</div>
-            <h1 id="tTitle">—</h1>
-            <div class="head-meta" id="tMeta"></div>
-          </div>
-          <div class="head-actions">
-            <span class="pill" id="tStatus">—</span>
-            <button class="btn btn-ghost" id="btnPause">Pausar</button>
-            <button class="btn btn-ghost" id="btnResume" hidden>Retomar</button>
-            <button class="btn btn-danger" id="btnStop">Parar</button>
-            <button class="btn btn-ghost" id="btnRestart" hidden>Caçar de novo</button>
-          </div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="description" content="FOSC/TS — plataforma de gestão de análises de segurança autorizadas." />
+    <title>FOSC/TS — Painel de segurança</title>
+    <link rel="icon" type="image/svg+xml" href="./assets/fosc-ts.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./tokens.css" />
+    <link rel="stylesheet" href="./features.css" />
+    <link rel="stylesheet" href="./terminal.css" />
+  </head>
+  <body>
+    <svg class="svg-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></symbol>
+      <symbol id="i-crosshair" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22"/></symbol>
+      <symbol id="i-radar" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7a5 5 0 1 0 5 5"/><path d="m12 12 8-8M15 4h5v5"/></symbol>
+      <symbol id="i-bug" viewBox="0 0 24 24"><path d="M8 9h8v7a4 4 0 0 1-8 0V9ZM9 8a3 3 0 0 1 6 0M12 4V2M4 13h4m8 0h4M5 8l3 2m11-2-3 2M5 18l3-2m11 2-3-2"/></symbol>
+      <symbol id="i-file" viewBox="0 0 24 24"><path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10Z"/><path d="M13 3v7h7M8 14h8M8 17h8"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.2.9-1.4 2.4-1.4-.6a8 8 0 0 1-1.5.9l-.2 1.5h-2.8l-.3-1.5a8 8 0 0 1-1.6-.9l-1.4.6-1.4-2.4 1.2-.9a7 7 0 0 1 0-1.8l-1.2-.9 1.4-2.4 1.4.6a8 8 0 0 1 1.6-.9l.3-1.5h2.8l.2 1.5a8 8 0 0 1 1.5.9l1.4-.6 1.4 2.4-1.2.9a7 7 0 0 1 0 1.7Z" transform="translate(-1 -1)"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4 4"/></symbol>
+      <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z"/><path d="m9 12 2 2 4-4"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></symbol>
+      <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10m-7 6h4"/></symbol>
+      <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+      <symbol id="i-trend" viewBox="0 0 24 24"><path d="m3 17 6-6 4 4 8-9M15 6h6v6"/></symbol>
+      <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/></symbol>
+      <symbol id="i-scope" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/><path d="m16 16 2 2 4-4"/></symbol>
+      <symbol id="i-plan" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></symbol>
+      <symbol id="i-approve" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 11l2 2 4-4"/></symbol>
+      <symbol id="i-audit" viewBox="0 0 24 24"><path d="M5 4h14v17H5zM8 8h8M8 12h8M8 16h5"/><path d="M9 2h6"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><path d="M8 3h8l5 5v8l-5 5H8l-5-5V8z"/><path d="M9 9l6 6m0-6-6 6"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 12 7-12 7z"/></symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></symbol>
+    </svg>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar">
+          <a href="#campaign" class="brand" aria-label="FOSC/TS — console da campanha"><img src="./assets/fosc-ts.svg" alt="FOSC/TS" /></a>
+        <div class="workspace-select"><span class="workspace-mark">S</span><span><strong>SecureLab</strong><small>Workspace principal</small></span><span class="workspace-caret">⌄</span></div>
+        <div class="nav-label">MENU PRINCIPAL</div>
+        <nav class="main-nav" aria-label="Navegação principal">
+          <a href="#campaign" class="nav-item active" data-page="campaign"><svg><use href="#i-radar"/></svg><span>Console da campanha</span></a>
+          <a href="#scope" class="nav-item" data-page="scope"><svg><use href="#i-scope"/></svg><span>Escopo e política</span></a>
+          <a href="#plan" class="nav-item" data-page="plan"><svg><use href="#i-plan"/></svg><span>Plano do agente</span></a>
+          <a href="#approvals" class="nav-item" data-page="approvals"><svg><use href="#i-approve"/></svg><span>Aprovação humana</span><span class="nav-count alert-count" id="approval-count">2</span></a>
+          <a href="#terminal" class="nav-item" data-page="terminal"><svg><use href="#i-terminal"/></svg><span>Terminal da campanha</span></a>
+          <a href="#findings" class="nav-item" data-page="findings"><svg><use href="#i-bug"/></svg><span>Achados confirmados</span><span class="nav-count">3</span></a>
+          <a href="#reports" class="nav-item" data-page="reports"><svg><use href="#i-file"/></svg><span>Relatórios</span></a>
+          <a href="#audit" class="nav-item" data-page="audit"><svg><use href="#i-audit"/></svg><span>Trilha de auditoria</span></a>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="sidebar-callout emergency-callout"><span class="callout-icon"><svg><use href="#i-stop"/></svg></span><strong>Parada de emergência</strong><p>Interrompe a campanha e cancela aprovações pendentes.</p><button class="button button-danger button-small" data-action="emergency">Interromper campanha</button></div>
+          <div class="profile"><div class="avatar">AC</div><span><strong>Alex Costa</strong><small>Analista de segurança</small></span><button class="icon-button tiny" aria-label="Opções do perfil"><svg><use href="#i-more"/></svg></button></div>
+        </div>
+      </aside>
+      <div class="mobile-menu-backdrop" data-action="mobile-close"></div>
+      <main class="main-area">
+        <header class="topbar">
+          <button class="icon-button mobile-menu" id="mobile-menu" aria-label="Abrir navegação"><svg><use href="#i-menu"/></svg></button>
+          <div class="breadcrumbs"><span>Workspace</span><svg><use href="#i-chevron"/></svg><strong id="breadcrumb-current">Console da campanha</strong></div>
+          <div class="topbar-actions"><div class="environment"><span></span> Escopo controlado</div><button class="button button-danger emergency-top" data-action="emergency"><svg><use href="#i-stop"/></svg> Parada de emergência</button><div class="top-avatar">AC</div></div>
         </header>
-
-        <div class="kpis" id="kpis"></div>
-
-        <div class="grid-2">
-          <div class="card">
-            <div class="card-head">
-              <h3>Atividade ao vivo</h3>
-              <label class="toggle-sm"><input type="checkbox" id="feedAuto" checked> Rolar automaticamente</label>
-            </div>
-            <div class="feed" id="feed"></div>
-          </div>
-          <div class="card">
-            <div class="card-head"><h3>Em execução</h3><span class="muted" id="activeCount"></span></div>
-            <div class="inflight" id="inflight"></div>
-            <div class="card-head mt"><h3>Ritmo</h3><span class="muted">endpoints a cada 10 min</span></div>
-            <div class="spark" id="spark"></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-head"><h3>Achados confirmados</h3><span class="muted" id="confCount"></span></div>
-          <div class="findings" id="findings"></div>
-        </div>
-
-        <div class="card">
-          <div class="card-head">
-            <h3>Resultados</h3>
-            <div class="filters">
-              <div class="chips" id="chips"></div>
-              <input type="search" id="search" placeholder="Filtrar por URL ou classe">
-            </div>
-          </div>
-          <div class="table-wrap">
-            <table class="table" id="resultsTable">
-              <thead><tr><th>Veredito</th><th>Classe</th><th>Endpoint</th><th>Resumo</th><th class="num">Custo</th><th class="num">Quando</th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============ KNOWLEDGE VIEW ============ -->
-    <!-- ============ QUEUE VIEW ============ -->
-    <section class="view" id="viewQueue" hidden>
-      <header class="page-head">
-        <div>
-          <div class="eyebrow">Orquestração</div>
-          <h1>Fila de caçadas</h1>
-          <div class="head-meta" id="queueMeta">Vários pentesters, uma fila. Um alvo tem uma campanha só; a concorrência é limitada para não sobrecarregar os modelos nem os alvos.</div>
-        </div>
-      </header>
-      <div class="kpis" id="queueKpis"></div>
-      <div class="card">
-        <div class="card-head"><h3>Em execução e aguardando</h3></div>
-        <div class="table-wrap">
-          <table class="table" id="queueTable">
-            <thead><tr><th>Situação</th><th>Alvo</th><th>Prioridade</th><th>Quem</th><th class="num">Previsão</th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <section class="view" id="viewKnowledge" hidden>
-      <header class="page-head">
-        <div>
-          <div class="eyebrow">Memória entre caçadas</div>
-          <h1>Aprendizado</h1>
-          <div class="head-meta">Cada caçada grava lições aqui. As mais relevantes entram no prompt do próximo item, e o ranking usa a taxa de acerto por tecnologia e classe.</div>
-        </div>
-      </header>
-      <div class="kpis" id="kKpis"></div>
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-head"><h3>Acerto por classe</h3></div>
-          <div id="kByClass"></div>
-        </div>
-        <div class="card">
-          <div class="card-head"><h3>O que funcionou por tecnologia</h3></div>
-          <div id="kByTech"></div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-head">
-          <h3>Playbook consolidado</h3>
-          <button class="btn btn-ghost btn-sm" id="btnSavePlaybook">Salvar</button>
-        </div>
-        <textarea id="playbook" class="playbook" spellcheck="false" placeholder="O playbook é gerado automaticamente depois das primeiras caçadas…"></textarea>
-      </div>
-      <div class="card">
-        <div class="card-head">
-          <h3>Lições recentes</h3>
-          <div class="chips" id="kChips"></div>
-        </div>
-        <div id="kLessons" class="lessons"></div>
-      </div>
-    </section>
-
-    <!-- ============ CHAT VIEW ============ -->
-    <section class="view" id="viewChat" hidden>
-      <header class="page-head">
-        <div>
-          <div class="eyebrow">Agente FOSC/TS</div>
-          <h1>Conversa</h1>
-          <div class="head-meta">Converse com o agente de pentest. Com um alvo em contexto ele conhece os achados e pode testar o alvo ao vivo; sem alvo, é um assistente geral de segurança ofensiva.</div>
-        </div>
-        <div class="head-actions">
-          <input id="chatTargetInput" class="select" placeholder="alvo.com ou https://app.alvo.com" hidden>
-          <select id="chatCtx" class="select" title="contexto da conversa"></select>
-          <button class="btn btn-ghost btn-sm" id="chatSetTarget" title="informar um alvo">+ alvo</button>
-          <select id="chatModel" class="select" title="modelo">
-            <option value="sonnet">Sonnet</option>
-            <option value="opus">Opus</option>
-          </select>
-        </div>
-      </header>
-      <div class="card chat-card">
-        <div class="chat-log" id="chatLog"></div>
-        <div class="chat-activity" id="chatActivity" hidden></div>
-        <form class="chat-input" id="chatForm" autocomplete="off">
-          <textarea id="chatText" rows="1" placeholder="Pergunte algo…  (Enter envia · Shift+Enter nova linha)"></textarea>
-          <button class="btn btn-primary" type="submit" id="chatSend">Enviar</button>
-        </form>
-      </div>
-    </section>
-
-    <!-- ============ SETTINGS VIEW ============ -->
-    <section class="view" id="viewSettings" hidden>
-      <header class="page-head">
-        <div>
-          <div class="eyebrow">Preferências</div>
-          <h1>Configurações</h1>
-        </div>
-      </header>
-      <div class="card settings">
-        <div class="card-head"><h3>Telegram</h3><span class="pill" id="tgStatus">—</span></div>
-        <p class="muted">Avisa no Telegram toda vez que um achado passa pela revisão do Opus. Crie um bot com o @BotFather, mande uma mensagem para ele e use o seu chat id.</p>
-        <div class="form-row">
-          <label>Bot token<input type="password" id="tgToken" placeholder="manter o atual" autocomplete="off"></label>
-          <label>Chat id<input type="text" id="tgChat" placeholder="123456789"></label>
-        </div>
-        <div class="form-actions">
-          <button class="btn btn-primary" id="btnSaveTg">Salvar</button>
-          <button class="btn btn-ghost" id="btnTestTg">Enviar teste</button>
-        </div>
-      </div>
-      <div class="card settings">
-        <div class="card-head"><h3>Painel</h3></div>
-        <label class="check"><input type="checkbox" id="soundToggle"> Tocar som quando um achado for confirmado</label>
-        <p class="muted">O painel só escuta em 127.0.0.1 e recusa requisições de outras origens. As caçadas rodam como processos próprios e continuam mesmo se você fechar o painel.</p>
-      </div>
-    </section>
-  </main>
-</div>
-
-<!-- drawer -->
-<div class="scrim" id="scrim" hidden></div>
-<aside class="drawer" id="drawer" aria-hidden="true">
-  <div class="drawer-head">
-    <div id="dHead"></div>
-    <button class="icon-btn" id="dClose" aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-  </div>
-  <div class="drawer-tabs" id="dTabs"></div>
-  <div class="drawer-body" id="dBody"></div>
-</aside>
-
-<!-- new hunt modal -->
-<div class="modal-wrap" id="modal" hidden>
-  <div class="modal">
-    <div class="modal-head">
-      <h2>Nova caçada</h2>
-      <button class="icon-btn" id="mClose" aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        <div class="page-content" id="page-content"></div>
+      </main>
     </div>
-    <form id="huntForm" autocomplete="off">
-      <label class="full">Alvo<input type="text" id="fTarget" placeholder="alvo.com ou https://app.alvo.com" required></label>
-      <label class="full">Escopo (opcional)<input type="text" id="fScope" placeholder="ex.: *.alvo.com, exceto pagamentos.alvo.com"></label>
-      <div class="form-row">
-        <label>Workers<input type="number" id="fWorkers" value="6" min="1" max="12"></label>
-        <label>Timeout por item (s)<input type="number" id="fTimeout" value="600" min="60"></label>
-        <label>Máx. itens<input type="number" id="fMax" placeholder="todos" min="1"></label>
-      </div>
-      <div class="switches">
-        <label class="switch"><input type="checkbox" id="fCont"><span></span> Contínuo (nunca para, refaz o recon)</label>
-        <label class="switch"><input type="checkbox" id="fFresh"><span></span> Começar do zero (ignora cache)</label>
-        <label class="switch"><input type="checkbox" id="fNoNuclei"><span></span> Pular nuclei no recon</label>
-      </div>
-      <p class="muted small">Cada endpoint usa uma sessão do Claude (Sonnet). Achados marcados como confirmados passam por uma revisão adversarial com o Opus. Para um alvo novo, comece com um limite de itens.</p>
-      <div class="form-actions">
-        <button type="button" class="btn btn-ghost" id="mCancel">Cancelar</button>
-        <button type="submit" class="btn btn-primary">Começar caçada</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<div class="toasts" id="toasts"></div>
-<script src="js/mock.js"></script>
-<script src="js/app.js"></script>
-</body>
+    <div class="modal-layer" id="modal-layer" aria-hidden="true"></div>
+    <div class="toast-region" id="toast-region" aria-live="polite"></div>
+    <script type="module" src="./src/app.js"></script>
+  </body>
 </html>
