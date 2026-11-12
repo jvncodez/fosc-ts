@@ -152,6 +152,24 @@ STATIC_EXT = {
 SEVERITIES = ["critical", "high", "medium", "low", "info"]
 
 
+def normalize_target(target: str) -> str:
+    """Canonical form of what the operator typed (CLI and web panel).
+
+    The URL fragment (`#/`, `#/login`…) is client-side SPA routing: it never
+    reaches the server, so it is not part of the target. Without this,
+    `https://x/#/` is rejected by the panel and splits into a separate
+    campaign from `https://x`. A bare trailing "/" on the origin is dropped
+    for the same reason."""
+    t = (target or "").strip()
+    t = t.split("#", 1)[0]
+    if "://" in t:
+        scheme, rest = t.split("://", 1)
+        if rest.endswith("/") and rest.count("/") == 1:
+            rest = rest[:-1]
+        t = f"{scheme.lower()}://{rest}"
+    return t
+
+
 def safe_name(target: str) -> str:
     return target.replace("/", "_").replace(":", "_")
 

@@ -824,3 +824,21 @@ class ArsenalTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NormalizeTargetTests(unittest.TestCase):
+    """What the operator types in the panel/CLI must map to one campaign."""
+
+    def test_spa_fragment_is_dropped(self):
+        from fosc import config, webview
+        for raw in ("https://1.migbot.com.br/#/", " https://1.migbot.com.br/#/login ",
+                    "https://1.migbot.com.br/", "https://1.migbot.com.br"):
+            t = config.normalize_target(raw)
+            self.assertEqual(t, "https://1.migbot.com.br")
+            self.assertTrue(webview.TARGET_RX.match(t))
+
+    def test_path_and_bare_host_kept(self):
+        from fosc import config
+        self.assertEqual(config.normalize_target("https://x.com/app/#/a"), "https://x.com/app/")
+        self.assertEqual(config.normalize_target("x.com"), "x.com")
+        self.assertEqual(config.normalize_target("HTTPS://x.com/"), "https://x.com")

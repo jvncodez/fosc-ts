@@ -364,6 +364,8 @@ _NO_TARGET = ("view", "chat", "shell", "approvals", "approve", "deny", "telegram
 def main():
     parser = build_parser()
     args = parser.parse_args()
+    if args.target:
+        args.target = config.normalize_target(args.target)
     if args.action not in _NO_TARGET and not args.target:
         parser.error("-a/--alvo is required for this action")
     print_banner()

@@ -54,7 +54,7 @@ def overview() -> dict:
 
 
 def start_hunt(p: dict) -> dict:
-    target = (p.get("target") or "").strip()
+    target = config.normalize_target(p.get("target") or "")
     if not TARGET_RX.match(target):
         return {"ok": False, "error": "alvo inválido"}
     st = RunState(target)

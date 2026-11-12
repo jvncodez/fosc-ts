@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 # Wrapper so `fosc` can be run/symlinked without activating the venv.
+# Uses the repo's .venv when present; otherwise the system python3 (container,
+# fresh clone, Kiro). The web panel launches hunts through this script, so it
+# must work in both cases.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-exec "$DIR/.venv/bin/python" -m fosc.cli "$@"
+PY="$DIR/.venv/bin/python"
+[ -x "$PY" ] || PY="$(command -v python3)"
+export PYTHONPATH="$DIR${PYTHONPATH:+:$PYTHONPATH}"
+exec "$PY" -m fosc.cli "$@"
