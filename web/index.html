@@ -1,78 +1,246 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FOSC/TS — Console</title>
-  <link rel="stylesheet" href="css/tokens.css">
-  <link rel="stylesheet" href="css/app.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FOSC/TS</title>
+<link rel="icon" href="assets/logo.svg">
+<link rel="stylesheet" href="css/app.css">
 </head>
 <body>
-  <!-- ===== Topo / marca ===== -->
-  <header class="topbar">
-    <div class="brand">
-      <img class="logo" src="assets/logo.svg" alt="FOSC/TS">
-      <span class="name">FOSC/TS</span>
-      <span class="tag">Ferramenta Ofensiva de Segurança Cibernética para Tecnologia e Serviços</span>
-    </div>
-    <span class="spacer"></span>
-    <span id="scope" class="badge-scope">escopo: —</span>
-  </header>
+<header class="topbar">
+  <a class="brand" href="#/">
+    <img src="assets/logo.svg" alt="" class="brand-logo">
+    <span class="brand-name">FOSC/TS</span>
+    <span class="brand-tag">Ferramenta Ofensiva de Segurança Cibernética para Tecnologia e Serviços</span>
+  </a>
+  <div class="topbar-right">
+    <div class="side-totals" id="sideTotals"></div>
+    <span class="env" id="modeLabel">Local</span>
+  </div>
+</header>
 
-  <!-- ===== Abas (os 8 pontos do desafio viram telas) ===== -->
-  <nav class="tabs">
-    <button class="tab active" data-panel="p-console">Console da campanha</button>
-    <button class="tab" data-panel="p-achados">Achados</button>
-    <button class="tab" data-panel="p-aprovacoes">Aprovações</button>
-    <button class="tab" data-panel="p-trilha">Trilha de auditoria</button>
-  </nav>
+<div class="app">
 
-  <main>
-    <!-- Console -->
-    <section id="p-console" class="panel active">
-      <div id="kpis" class="kpis"></div>
-      <div class="card">
-        <h2>Campanha</h2>
-        <p>Alvo autorizado e controle da campanha (iniciar, pausar, parar, interrupção
-           de emergência). <em>Área para as designers desenharem os controles.</em></p>
+  <aside class="sidebar">
+    <button class="btn btn-primary btn-block" id="btnNewHunt"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Nova caçada</button>
+
+    <nav class="side-nav">
+      <a href="#/" data-view="hunts" class="nav-link"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>Caçadas</a>
+      <a href="#/chat" data-view="chat" class="nav-link"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>Conversa</a>
+      <a href="#/knowledge" data-view="knowledge" class="nav-link"><svg viewBox="0 0 24 24"><path d="M5 4h10l4 4v12H5z"/><path d="M9 12h6M9 16h6"/></svg>Aprendizado</a>
+      <a href="#/settings" data-view="settings" class="nav-link"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>Configurações</a>
+    </nav>
+
+    <div class="side-label">Alvos</div>
+    <nav class="targets" id="targetList"></nav>
+
+    <div class="side-spacer"></div>
+    <div class="side-foot" id="version">—</div>
+  </aside>
+
+  <main class="main">
+
+    <!-- ============ HUNT VIEW ============ -->
+    <section class="view" id="viewHunt">
+      <div class="empty-state" id="emptyHunt">
+                <h2>Nenhum alvo selecionado</h2>
+        <p>Escolha um alvo na barra lateral ou comece uma caçada nova.</p>
+        <button class="btn btn-primary" id="btnNewHunt2">Nova caçada</button>
+      </div>
+
+      <div id="huntContent" hidden>
+        <header class="page-head">
+          <div>
+            <div class="eyebrow">Caçadas</div>
+            <h1 id="tTitle">—</h1>
+            <div class="head-meta" id="tMeta"></div>
+          </div>
+          <div class="head-actions">
+            <span class="pill" id="tStatus">—</span>
+            <button class="btn btn-ghost" id="btnPause">Pausar</button>
+            <button class="btn btn-ghost" id="btnResume" hidden>Retomar</button>
+            <button class="btn btn-danger" id="btnStop">Parar</button>
+            <button class="btn btn-ghost" id="btnRestart" hidden>Caçar de novo</button>
+          </div>
+        </header>
+
+        <div class="kpis" id="kpis"></div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head">
+              <h3>Atividade ao vivo</h3>
+              <label class="toggle-sm"><input type="checkbox" id="feedAuto" checked> Rolar automaticamente</label>
+            </div>
+            <div class="feed" id="feed"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Em execução</h3><span class="muted" id="activeCount"></span></div>
+            <div class="inflight" id="inflight"></div>
+            <div class="card-head mt"><h3>Ritmo</h3><span class="muted">endpoints a cada 10 min</span></div>
+            <div class="spark" id="spark"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Achados confirmados</h3><span class="muted" id="confCount"></span></div>
+          <div class="findings" id="findings"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Resultados</h3>
+            <div class="filters">
+              <div class="chips" id="chips"></div>
+              <input type="search" id="search" placeholder="Filtrar por URL ou classe">
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="table" id="resultsTable">
+              <thead><tr><th>Veredito</th><th>Classe</th><th>Endpoint</th><th>Resumo</th><th class="num">Custo</th><th class="num">Quando</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </section>
 
-    <!-- Achados -->
-    <section id="p-achados" class="panel">
+    <!-- ============ KNOWLEDGE VIEW ============ -->
+    <section class="view" id="viewKnowledge" hidden>
+      <header class="page-head">
+        <div>
+          <div class="eyebrow">Memória entre caçadas</div>
+          <h1>Aprendizado</h1>
+          <div class="head-meta">Cada caçada grava lições aqui. As mais relevantes entram no prompt do próximo item, e o ranking usa a taxa de acerto por tecnologia e classe.</div>
+        </div>
+      </header>
+      <div class="kpis" id="kKpis"></div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>Acerto por classe</h3></div>
+          <div id="kByClass"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>O que funcionou por tecnologia</h3></div>
+          <div id="kByTech"></div>
+        </div>
+      </div>
       <div class="card">
-        <h2>Achados confirmados</h2>
-        <table>
-          <thead><tr><th>Severidade</th><th>Classe</th><th>Endpoint</th><th>CVSS</th><th>Confiança</th><th>MITRE ATT&CK</th></tr></thead>
-          <tbody id="findings-body"></tbody>
-        </table>
+        <div class="card-head">
+          <h3>Playbook consolidado</h3>
+          <button class="btn btn-ghost btn-sm" id="btnSavePlaybook">Salvar</button>
+        </div>
+        <textarea id="playbook" class="playbook" spellcheck="false" placeholder="O playbook é gerado automaticamente depois das primeiras caçadas…"></textarea>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h3>Lições recentes</h3>
+          <div class="chips" id="kChips"></div>
+        </div>
+        <div id="kLessons" class="lessons"></div>
       </div>
     </section>
 
-    <!-- Aprovações -->
-    <section id="p-aprovacoes" class="panel">
-      <div class="card">
-        <h2>Aprovação humana (human-in-the-loop)</h2>
-        <div id="approvals-list"></div>
+    <!-- ============ CHAT VIEW ============ -->
+    <section class="view" id="viewChat" hidden>
+      <header class="page-head">
+        <div>
+          <div class="eyebrow">Agente FOSC/TS</div>
+          <h1>Conversa</h1>
+          <div class="head-meta">Converse com o agente de pentest. Com um alvo em contexto ele conhece os achados e pode testar o alvo ao vivo; sem alvo, é um assistente geral de segurança ofensiva.</div>
+        </div>
+        <div class="head-actions">
+          <input id="chatTargetInput" class="select" placeholder="alvo.com ou https://app.alvo.com" hidden>
+          <select id="chatCtx" class="select" title="contexto da conversa"></select>
+          <button class="btn btn-ghost btn-sm" id="chatSetTarget" title="informar um alvo">+ alvo</button>
+          <select id="chatModel" class="select" title="modelo">
+            <option value="sonnet">Sonnet</option>
+            <option value="opus">Opus</option>
+          </select>
+        </div>
+      </header>
+      <div class="card chat-card">
+        <div class="chat-log" id="chatLog"></div>
+        <div class="chat-activity" id="chatActivity" hidden></div>
+        <form class="chat-input" id="chatForm" autocomplete="off">
+          <textarea id="chatText" rows="1" placeholder="Pergunte algo…  (Enter envia · Shift+Enter nova linha)"></textarea>
+          <button class="btn btn-primary" type="submit" id="chatSend">Enviar</button>
+        </form>
       </div>
     </section>
 
-    <!-- Trilha -->
-    <section id="p-trilha" class="panel">
-      <div class="card">
-        <h2>Trilha de auditoria <span id="chain-status" style="float:right;font-size:13px"></span></h2>
-        <div id="audit-list"></div>
+    <!-- ============ SETTINGS VIEW ============ -->
+    <section class="view" id="viewSettings" hidden>
+      <header class="page-head">
+        <div>
+          <div class="eyebrow">Preferências</div>
+          <h1>Configurações</h1>
+        </div>
+      </header>
+      <div class="card settings">
+        <div class="card-head"><h3>Telegram</h3><span class="pill" id="tgStatus">—</span></div>
+        <p class="muted">Avisa no Telegram toda vez que um achado passa pela revisão do Opus. Crie um bot com o @BotFather, mande uma mensagem para ele e use o seu chat id.</p>
+        <div class="form-row">
+          <label>Bot token<input type="password" id="tgToken" placeholder="manter o atual" autocomplete="off"></label>
+          <label>Chat id<input type="text" id="tgChat" placeholder="123456789"></label>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" id="btnSaveTg">Salvar</button>
+          <button class="btn btn-ghost" id="btnTestTg">Enviar teste</button>
+        </div>
+      </div>
+      <div class="card settings">
+        <div class="card-head"><h3>Painel</h3></div>
+        <label class="check"><input type="checkbox" id="soundToggle"> Tocar som quando um achado for confirmado</label>
+        <p class="muted">O painel só escuta em 127.0.0.1 e recusa requisições de outras origens. As caçadas rodam como processos próprios e continuam mesmo se você fechar o painel.</p>
       </div>
     </section>
   </main>
+</div>
 
-  <p class="scaffold-note">
-    <strong>Scaffold mínimo.</strong> Paleta e marca em <code>css/tokens.css</code>;
-    dados de exemplo em <code>js/data.js</code>. O CLI do agente continua funcionando
-    à parte. Guia de evolução em <code>web/README.md</code>.
-  </p>
+<!-- drawer -->
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <div id="dHead"></div>
+    <button class="icon-btn" id="dClose" aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="drawer-tabs" id="dTabs"></div>
+  <div class="drawer-body" id="dBody"></div>
+</aside>
 
-  <script src="js/data.js"></script>
-  <script src="js/app.js"></script>
+<!-- new hunt modal -->
+<div class="modal-wrap" id="modal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h2>Nova caçada</h2>
+      <button class="icon-btn" id="mClose" aria-label="Fechar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <form id="huntForm" autocomplete="off">
+      <label class="full">Alvo<input type="text" id="fTarget" placeholder="alvo.com ou https://app.alvo.com" required></label>
+      <label class="full">Escopo (opcional)<input type="text" id="fScope" placeholder="ex.: *.alvo.com, exceto pagamentos.alvo.com"></label>
+      <div class="form-row">
+        <label>Workers<input type="number" id="fWorkers" value="2" min="1" max="8"></label>
+        <label>Timeout por item (s)<input type="number" id="fTimeout" value="600" min="60"></label>
+        <label>Máx. itens<input type="number" id="fMax" placeholder="todos" min="1"></label>
+      </div>
+      <div class="switches">
+        <label class="switch"><input type="checkbox" id="fCont"><span></span> Contínuo (nunca para, refaz o recon)</label>
+        <label class="switch"><input type="checkbox" id="fFresh"><span></span> Começar do zero (ignora cache)</label>
+        <label class="switch"><input type="checkbox" id="fNoNuclei"><span></span> Pular nuclei no recon</label>
+      </div>
+      <p class="muted small">Cada endpoint usa uma sessão do Claude (Sonnet). Achados marcados como confirmados passam por uma revisão adversarial com o Opus. Para um alvo novo, comece com um limite de itens.</p>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" id="mCancel">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Começar caçada</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+<script src="js/mock.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>

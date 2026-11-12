@@ -1,69 +1,81 @@
 # FOSC/TS — Interface Web (design)
 
-**Ferramenta Ofensiva de Segurança Cibernética para Tecnologia e Serviços** — a
-interface visual que será deployada. Hackathon **Hacka/TS — Banco do Brasil (BBTS)**.
+**Ferramenta Ofensiva de Segurança Cibernética para Tecnologia e Serviços**, a
+interface visual que será deployada no Hackathon **Hacka/TS (Banco do Brasil / BBTS)**.
 
-Este é um **scaffold mínimo** para a equipe de design evoluir. Ele renderiza sozinho
-(sem backend, sem build): dá pra **abrir o `index.html` direto no navegador**.
+Esta pasta é o **mesmo painel do FOSC** (`fosc/web/`), já com a marca FOSC/TS e a
+paleta BB, mais um **modo demo** que roda sem backend. É daqui que a equipe de
+design evolui o visual.
 
-> O **CLI do agente continua funcionando normalmente** e é independente desta pasta.
-> Nada aqui mexe no `fosc/` (a lógica do agente). Trabalhem à vontade.
+> O **CLI do agente continua funcionando normalmente** e não depende desta pasta.
+> Nada aqui mexe em `fosc/` (a lógica do agente). Podem mexer à vontade.
 
-## Paleta (Banco do Brasil / BBTS)
+## Como abrir
 
-Amarelo · Azul claro · Branco. Tudo definido em **`css/tokens.css`** — é O arquivo
-para ajustar a identidade. Mudou lá, a interface inteira acompanha.
+```bash
+cd web && python3 -m http.server 8080
+# abra http://localhost:8080
+```
+
+Abre em **modo demo**, com dados de exemplo que se mexem sozinhos: feed ao vivo,
+tarefas em execução, achados e chat. A barra superior mostra o selo "Demo".
+
+## Telas
+
+| Tela | Onde | O que mostra |
+|------|------|--------------|
+| **Caçadas** | `#/` | alvos na lateral, KPIs, atividade ao vivo, tarefas em voo, ritmo, achados confirmados, tabela de resultados; clique num achado para abrir o drawer (resumo, relatório, log) |
+| **Conversa** | `#/chat` | chat com o agente de IA, com ou sem alvo em contexto e escolha de modelo; mostra o que o agente está executando enquanto responde |
+| **Aprendizado** | `#/knowledge` | lições entre caçadas, taxa de acerto, playbook |
+| **Configurações** | `#/settings` | Telegram (alertas e aprovação remota), som |
+| **Nova caçada** | botão azul ou tecla `n` | modal com alvo, escopo, workers e opções |
+
+## Paleta e princípios visuais (Banco do Brasil / BBTS)
+
+Os tokens ficam no topo de **`css/app.css`**, no bloco `:root`. Quando eles mudam, o
+painel inteiro acompanha.
 
 | Token | Cor | Uso |
 |-------|-----|-----|
-| `--bb-amarelo` | `#FAE100` | acento/realce, borda do topo, selos |
-| `--bb-azul` | `#2E8BDA` | cor primária (azul claro) |
-| `--bb-azul-escuro` | `#0A3D7A` | texto/títulos, contraste |
-| `--bb-branco` | `#FFFFFF` | superfícies/cartões |
+| `--bb-amarelo` | `#FCE300` | **superfície de marca**: a barra superior |
+| `--bb-azul` | `#2E8BDA` | azul claro: progresso, gráfico, foco, abas, links |
+| `--bb-azul-acao` | `#1F6FB5` | botões primários (azul claro escurecido para dar contraste com o texto branco) |
+| `--bb-azul-suave` | `#EAF3FC` | itens selecionados (menu, filtro, bolha do usuário) |
+| `--bb-branco` | `#FFFFFF` | fundo e cartões |
+| `--text` | `#0A2A55` | texto azul-escuro |
 
-> Acessibilidade: amarelo e branco têm pouco contraste entre si — use **texto azul
-> escuro** sobre amarelo/branco (já é o padrão nos tokens).
+**Regras (para não virar cara de template genérico):**
+- Fundo branco e cartões com borda fina e sombra mínima. Nada de degradê, brilho ou glassmorphism.
+- Amarelo é marca (barra superior), não decoração. Nunca usar como cor de texto sobre branco.
+- Azul claro indica o que é clicável ou está selecionado.
+- Títulos em fonte normal. Monoespaçada só em URL, comando e código.
+- Rótulos em português e com só a inicial maiúscula ("Endpoints testados"), sem CAIXA ALTA espaçada.
+- Animação só quando informa algo (abrir o painel lateral), nunca em loop.
+- Vermelho só com sentido semântico: Parar, severidade crítica, erro.
 
 ## Estrutura
 
 ```
 web/
-├── index.html        # telas (Console, Achados, Aprovações, Trilha)
-├── css/
-│   ├── tokens.css    # ← PALETA e tokens (mexer aqui primeiro)
-│   └── app.css       # estilos base dos componentes
-├── js/
-│   ├── data.js       # dados de EXEMPLO (trocar/editar à vontade)
-│   └── app.js        # render + navegação por abas
-└── assets/
-    └── logo.svg      # marca placeholder (trocar)
+├── index.html      # todas as telas (caçadas, conversa, aprendizado, config, drawer, modal)
+├── css/app.css     # ← tokens da paleta no topo + todos os estilos
+├── js/app.js       # lógica do painel (igual à do fosc/web, só recolorida)
+├── js/mock.js      # MODO DEMO: dados de exemplo que imitam a API do agente
+└── assets/logo.svg # marca FOSC/TS provisória (trocar pelo logo final)
 ```
 
-## Como pré-visualizar
+## Ideias para evoluir
 
-- **Simples:** dê duplo-clique em `index.html`.
-- **Com servidor local** (recomendado, igual ao deploy):
-  ```bash
-  cd web && python3 -m http.server 8080
-  # abra http://localhost:8080
-  ```
+- [ ] Logo definitivo, tipografia e ícones no tom BB.
+- [ ] Tela de **Aprovações** (human-in-the-loop) e de **Trilha de auditoria** (selo íntegra ✓ / violada ✗, `scope_block`).
+- [ ] Botão de **halt de emergência** bem visível.
+- [ ] Responsivo/mobile, microinterações.
 
-## O que já tem (e o que melhorar)
+## Integração com o agente
 
-As 4 telas espelham os critérios do desafio (Console da campanha, Achados confirmados,
-Aprovação humana, Trilha de auditoria). Estão **propositalmente cruas** — pontos para
-evoluir:
-
-- [ ] Identidade: logo definitivo, tipografia, ícones, tom BB.
-- [ ] Console: controles de campanha (iniciar/pausar/parar/**halt de emergência**).
-- [ ] Achados: filtros por severidade, drawer de detalhe + PoC + relatório.
-- [ ] Aprovações: fluxo de aprovar/negar (hoje os botões são protótipo).
-- [ ] Trilha: destaque visual do selo **íntegra ✓ / VIOLADA ✗** e dos `scope_block`.
-- [ ] Responsivo/mobile, dark mode (opcional), microinterações.
-
-## Integração com o agente (depois)
-
-Hoje a tela lê `js/data.js` (mock). Na integração, os mesmos campos virão da API do
-agente (o viewer `fosc/webview.py` já serve o estado real: snapshot da campanha,
-achados, aprovações e a trilha de auditoria). O formato do mock foi desenhado para
-casar com esses dados — manter os mesmos nomes de campo facilita o plugue.
+O `js/mock.js` imita **as mesmas rotas e os mesmos campos** da API real
+(`fosc/webview.py`: `/api/overview`, `/api/state`, `/api/events` (SSE), `/api/chat`,
+`/api/finding`, `/api/log`, `/api/knowledge`, `/api/config`). Abrir com `?live`
+desliga o mock e chama a API de verdade. Falta um passo, do lado do agente: hoje o
+viewer (`fosc -v`) serve `fosc/web/`, e precisa passar a servir esta pasta. Mantendo
+os nomes dos campos, o plugue é direto.
