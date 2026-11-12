@@ -45,6 +45,13 @@ def risk(action_type: str) -> str:
     return "sensitive"  # sensitive or unknown -> treat as sensitive
 
 
+def tiers() -> dict:
+    """Os tiers determinísticos reais, como o motor os aplica. Fonte única para
+    a UI (Escopo e política) e qualquer relatório — reflete o que risk() decide."""
+    return {"passive": sorted(_PASSIVE), "sensitive": sorted(_SENSITIVE),
+            "prohibited": sorted(_PROHIBITED)}
+
+
 def operator() -> str:
     """Who is accountable for an approval. Real deployments bind this to an
     authenticated identity; here it comes from the environment / git identity."""

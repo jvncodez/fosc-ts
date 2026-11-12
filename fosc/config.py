@@ -72,6 +72,12 @@ SQS_URL = os.environ.get("SENTINELA_SQS_URL", "")
 # para o uso single-box continuar lançando a caçada direto do painel.
 QUEUE_ENABLED = bool(SQS_URL) or os.environ.get("SENTINELA_QUEUE", "").lower() in ("1", "true", "yes")
 AWS_REGION = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+# Painel atrás de proxy autenticado (API Gateway + Cognito na AWS). Quando
+# definido (ex.: https://sentinela.suaempresa.com), o viewer confia no proxy
+# para roteamento + autenticação (Cognito valida o usuário no API Gateway) e
+# mantém a defesa CSRF por Origin == este valor + header X-FOSC. Vazio = modo
+# single-box: bind e guards travados em 127.0.0.1 (comportamento padrão).
+PUBLIC_ORIGIN = os.environ.get("SENTINELA_PUBLIC_ORIGIN", "").strip().rstrip("/")
 MAX_HUNTS = int(os.environ.get("SENTINELA_MAX_HUNTS", "5"))        # caçadas simultâneas (cota Bedrock)
 QUEUE_ETA_PER_JOB = int(os.environ.get("SENTINELA_QUEUE_ETA", "180"))  # s por posição, estimativa p/ UI
 QUEUE_POLL = int(os.environ.get("SENTINELA_QUEUE_POLL", "5"))      # s entre ciclos do despachante

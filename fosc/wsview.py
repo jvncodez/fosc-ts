@@ -12,7 +12,7 @@ import signal
 import time
 from pathlib import Path
 
-from . import config
+from . import authz, config
 from .authz import ApprovalStore, operator
 from .state import RunState, list_runs
 
@@ -80,25 +80,50 @@ def _campaign(st: RunState | None, snap: dict) -> dict:
             "cost": round(m.get("cost_usd") or 0, 2), "confirmed": snap.get("confirmed_count") or 0}
 
 
-def _policies() -> dict:
-    # Reflete os tiers determinísticos do authz (passiva/sensível/proibida) + escopo.
-    return {
-        "allowed": [
-            "Recon e enumeração passiva no escopo autorizado",
-            "Mineração de endpoints do bundle JS (SPA)",
-            "Fingerprint e descoberta sem alteração de estado",
-        ],
-        "conditional": [
-            "Teste ativo de vulnerabilidade (exploração) — exige aprovação humana",
-            "Escalada de privilégio após obter execução — exige aprovação humana",
-            "Qualquer ação sensível classificada pelo Authorization Engine",
-        ],
-        "prohibited": [
-            "Sair do escopo autorizado (host pai/irmão/subdomínio)",
-            "Destruição, apagamento ou criptografia de dados",
-            "DoS/DDoS, persistência, exfiltração ou movimentação lateral",
-        ],
-    }
+# Rótulos PT para os action-types reais do Authorization Engine (authz.tiers()).
+# Um token sem rótulo aqui aparece como ele mesmo — nada é inventado.
+_ACTION_PT = {
+    "recon": "Reconhecimento e enumeração passiva", "passive": "Coleta passiva (sem alterar estado)",
+    "read": "Leitura de respostas dentro do escopo", "enumerate": "Enumeração de endpoints e parâmetros",
+    "fingerprint": "Fingerprint de tecnologia", "discovery": "Descoberta de superfície (mineração do JS da SPA)",
+    "active-hunt": "Teste ativo de vulnerabilidade", "exploit": "Exploração de vulnerabilidade",
+    "exploitation": "Exploração de vulnerabilidade", "privilege-escalation": "Escalada de privilégio",
+    "db-scan": "Varredura de banco de dados", "database-scan": "Varredura de banco de dados",
+    "reverse-shell": "Shell reverso / execução remota", "upload": "Upload de arquivo",
+    "write": "Ação que altera estado (write)", "lateral-movement": "Movimentação lateral",
+    "data-exfil": "Exfiltração de dados", "credential-access": "Acesso a credenciais",
+    "destroy": "Destruição de dados", "delete-data": "Apagamento de dados", "ransom": "Ransomware / extorsão",
+    "encrypt-data": "Criptografia de dados da vítima", "dos": "Negação de serviço (DoS)",
+    "ddos": "Negação de serviço distribuída (DDoS)", "denial-of-service": "Negação de serviço",
+    "phishing": "Phishing", "social-engineering": "Engenharia social",
+    "exfil-pii-bulk": "Exfiltração em massa de PII", "modify-production-data": "Modificação de dados de produção",
+    "disable-logging": "Desativar logging / telemetria", "persistence": "Persistência no alvo",
+}
+
+
+def _tier_items(tokens: list[str]) -> list[str]:
+    out, seen = [], set()
+    for t in tokens:
+        label = _ACTION_PT.get(t, t)
+        if label not in seen:
+            seen.add(label)
+            out.append(label)
+    return out
+
+
+def _policies(st: RunState | None = None) -> dict:
+    """As três listas vêm dos tiers determinísticos REAIS do Authorization Engine
+    (authz.tiers()): passivas auto-aprovadas / sensíveis exigem aprovação humana /
+    proibidas recusadas automaticamente. Em 'allowed' entra ainda o escopo real da
+    campanha (meta.scope ou o alvo), que o proxy de escopo impõe a cada requisição."""
+    t = authz.tiers()
+    allowed = _tier_items(t["passive"])
+    if st:
+        scope = " ".join((st.read_meta().get("scope") or "").split())
+        line = scope.split(". ")[0][:160] if scope else f"Restrito ao escopo autorizado: {st.target}"
+        allowed = [line] + allowed
+    return {"allowed": allowed, "conditional": _tier_items(t["sensitive"]),
+            "prohibited": _tier_items(t["prohibited"])}
 
 
 def _plan(audit: list[dict]) -> list[dict]:
@@ -234,7 +259,7 @@ def workspace(target: str | None = None) -> dict:
     audit = _read_jsonl(st.audit_path)
     return {
         "campaign": _campaign(st, snap),
-        "policies": _policies(),
+        "policies": _policies(st),
         "plan": _plan(audit),
         "commands": _commands(audit),
         "approvals": _approvals(st),

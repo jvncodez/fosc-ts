@@ -232,6 +232,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # -- guards ----------------------------------------------------------
     def _host_ok(self) -> bool:
+        if config.PUBLIC_ORIGIN:            # atrás de API Gateway + Cognito
+            return True                     # roteamento e autenticação são do proxy
         host = (self.headers.get("Host") or "").lower()
         return host in (f"127.0.0.1:{self.port}", f"localhost:{self.port}")
 
@@ -239,6 +241,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.headers.get("X-FOSC") != "1":
             return False
         origin = self.headers.get("Origin")
+        if config.PUBLIC_ORIGIN:            # CSRF: só o domínio público autenticado
+            return origin in (None, config.PUBLIC_ORIGIN)
         return origin in (None, f"http://127.0.0.1:{self.port}", f"http://localhost:{self.port}")
 
     # -- responses -------------------------------------------------------
@@ -359,10 +363,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def run_viewer(port: int, preselect_target: str | None = None):
     Handler.port = port
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    # Single-box: bind só no loopback. Atrás de proxy autenticado (API Gateway +
+    # Cognito), o ALB/VPC Link chega pela interface da task, não pelo loopback,
+    # então bindamos em 0.0.0.0 — o isolamento passa a ser do Security Group
+    # (ingress só do ALB) + authn do Cognito no API Gateway.
+    bind = "0.0.0.0" if config.PUBLIC_ORIGIN else "127.0.0.1"
+    server = http.server.ThreadingHTTPServer((bind, port), Handler)
     server.daemon_threads = True
-    url = f"http://127.0.0.1:{port}/" + (f"#/t/{preselect_target}" if preselect_target else "")
-    print(f"[fosc] viewer: {url}  (127.0.0.1 only · Ctrl+C para fechar; caçadas continuam rodando)")
+    if config.PUBLIC_ORIGIN:
+        print(f"[fosc] viewer: bind {bind}:{port} · atrás de {config.PUBLIC_ORIGIN} "
+              f"(API Gateway + Cognito · SG restringe ingress ao ALB)")
+    else:
+        url = f"http://127.0.0.1:{port}/" + (f"#/t/{preselect_target}" if preselect_target else "")
+        print(f"[fosc] viewer: {url}  (127.0.0.1 only · Ctrl+C para fechar; caçadas continuam rodando)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
