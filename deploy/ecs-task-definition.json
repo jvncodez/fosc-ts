@@ -1,0 +1,56 @@
+{
+  "_comment": "BB-Sentinela — ECS Fargate task definition. Troque os placeholders <...>. O estado (SENTINELA_HOME) é um volume EFS persistente; os segredos vêm do Secrets Manager; o Bedrock é autenticado pelo taskRoleArn (sem chaves na imagem).",
+  "family": "bb-sentinela",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "4096",
+  "runtimePlatform": { "cpuArchitecture": "X86_64", "operatingSystemFamily": "LINUX" },
+  "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/bb-sentinela-execution",
+  "taskRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/bb-sentinela-task",
+  "volumes": [
+    {
+      "name": "sentinela-state",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "<EFS_FILE_SYSTEM_ID>",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": { "accessPointId": "<EFS_ACCESS_POINT_ID>", "iam": "ENABLED" }
+      }
+    }
+  ],
+  "containerDefinitions": [
+    {
+      "name": "bb-sentinela",
+      "image": "<ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/bb-sentinela:latest",
+      "essential": true,
+      "mountPoints": [
+        { "sourceVolume": "sentinela-state", "containerPath": "/data", "readOnly": false }
+      ],
+      "environment": [
+        { "name": "AWS_REGION", "value": "<AWS_REGION>" },
+        { "name": "SENTINELA_HOME", "value": "/data" },
+        { "name": "SENTINELA_PROVIDER", "value": "bedrock" },
+        { "name": "SENTINELA_AUTHZ", "value": "ask" },
+        { "name": "SENTINELA_SCOPE_PROXY", "value": "1" },
+        { "name": "CLAUDE_CODE_USE_BEDROCK", "value": "1" },
+        { "name": "BEDROCK_SONNET", "value": "us.anthropic.claude-sonnet-4-5-20250929-v1:0" },
+        { "name": "BEDROCK_OPUS", "value": "us.anthropic.claude-opus-4-1-20250805-v1:0" },
+        { "name": "BEDROCK_HAIKU", "value": "us.anthropic.claude-haiku-4-5-20251001-v1:0" },
+        { "name": "TARGET", "value": "https://1.migbot.com.br/#/" },
+        { "name": "FOSC_ARGS", "value": "--continuous --interval 3600" }
+      ],
+      "secrets": [
+        { "name": "TELEGRAM_TOKEN", "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<ACCOUNT_ID>:secret:bb-sentinela/telegram-XXXX:token::" },
+        { "name": "TELEGRAM_CHAT_ID", "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<ACCOUNT_ID>:secret:bb-sentinela/telegram-XXXX:chat_id::" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/bb-sentinela",
+          "awslogs-region": "<AWS_REGION>",
+          "awslogs-stream-prefix": "sentinela"
+        }
+      }
+    }
+  ]
+}

@@ -768,6 +768,18 @@ class TelegramTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(desc, "telegram not configured")
 
+    def test_secrets_from_env(self):
+        """AWS injects Telegram creds as env from Secrets Manager — no repo/image."""
+        from fosc import notify
+        os.environ["TELEGRAM_TOKEN"] = "tok"
+        os.environ["TELEGRAM_CHAT_ID"] = "42"
+        try:
+            self.assertTrue(notify.configured(cfg={}))
+            self.assertEqual(notify.telegram_cfg(cfg={}), ("tok", "42"))
+        finally:
+            os.environ.pop("TELEGRAM_TOKEN", None)
+            os.environ.pop("TELEGRAM_CHAT_ID", None)
+
     def test_approval_message_has_buttons(self):
         from fosc import notify
         captured = {}

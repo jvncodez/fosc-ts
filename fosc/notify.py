@@ -7,6 +7,7 @@ phone, which is the "aprovação remota" the governance challenge asks for.
 """
 import html
 import json
+import os
 import urllib.error
 import urllib.request
 
@@ -17,8 +18,13 @@ API = "https://api.telegram.org/bot{token}/{method}"
 
 
 def telegram_cfg(cfg: dict | None = None) -> tuple[str | None, str | None]:
+    """Token/chat from the user config file OR the environment. The env fallback is
+    how AWS injects them from Secrets Manager — secrets never live in the repo or
+    the image."""
     cfg = cfg if cfg is not None else config.load_user_config()
-    return cfg.get("telegram_token"), cfg.get("telegram_chat_id")
+    token = cfg.get("telegram_token") or os.environ.get("TELEGRAM_TOKEN")
+    chat = cfg.get("telegram_chat_id") or os.environ.get("TELEGRAM_CHAT_ID")
+    return token, chat
 
 
 def configured(cfg: dict | None = None) -> bool:

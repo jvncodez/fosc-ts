@@ -1,0 +1,37 @@
+{
+  "_comment": "Política de MENOR privilégio para o taskRoleArn do BB-Sentinela. Dá só: invocar os modelos Bedrock aprovados, ler o segredo do Telegram, montar o EFS e escrever logs. Nenhuma permissão sobre o alvo — o escopo é garantido pelo proxy, não por IAM. Troque <ACCOUNT_ID>, <AWS_REGION>, <EFS_FILE_SYSTEM_ID>.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockInvokeApprovedModels",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+      "Resource": [
+        "arn:aws:bedrock:<AWS_REGION>::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "arn:aws:bedrock:<AWS_REGION>::foundation-model/anthropic.claude-opus-4-1-20250805-v1:0",
+        "arn:aws:bedrock:<AWS_REGION>::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
+        "arn:aws:bedrock:<AWS_REGION>:<ACCOUNT_ID>:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "arn:aws:bedrock:<AWS_REGION>:<ACCOUNT_ID>:inference-profile/us.anthropic.claude-opus-4-1-20250805-v1:0",
+        "arn:aws:bedrock:<AWS_REGION>:<ACCOUNT_ID>:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0"
+      ]
+    },
+    {
+      "Sid": "ReadTelegramSecret",
+      "Effect": "Allow",
+      "Action": ["secretsmanager:GetSecretValue"],
+      "Resource": ["arn:aws:secretsmanager:<AWS_REGION>:<ACCOUNT_ID>:secret:bb-sentinela/telegram-*"]
+    },
+    {
+      "Sid": "MountPersistentState",
+      "Effect": "Allow",
+      "Action": ["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"],
+      "Resource": ["arn:aws:elasticfilesystem:<AWS_REGION>:<ACCOUNT_ID>:file-system/<EFS_FILE_SYSTEM_ID>"]
+    },
+    {
+      "Sid": "Logs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": ["arn:aws:logs:<AWS_REGION>:<ACCOUNT_ID>:log-group:/ecs/bb-sentinela:*"]
+    }
+  ]
+}

@@ -50,10 +50,17 @@ Legenda: [x] feito · [ ] a fazer. Cada tarefa referencia o requisito (Rn).
       + índice técnico + integridade da trilha, determinístico. (#7)
 - [~] 11. Validação end-to-end no Juice Shop: SPA + anti-fuga feitos; hunt com proxy
       em validação (smoke test com `SENTINELA_SCOPE_PROXY=1`).
-- [~] 12. AWS/Kiro: envs prontas (`SENTINELA_HOME`/`_PROVIDER`/`_AUTHZ`/`_SCOPE_PROXY`,
-      `BEDROCK_*`); falta volume persistente + aprovação remota.
-- [ ] 13. Rebrand (banner/nome; o pacote interno ainda é `fosc`).
-- [ ] T. Melhorar o bot do Telegram (`fosc/notify.py`) — a fazer.
+- [x] 12. Deploy AWS/Kiro (`deploy/`): Dockerfile (claude CLI + Bedrock + recon),
+      entrypoint headless (recusa yolo), ECS Fargate task def com **EFS** p/
+      `SENTINELA_HOME` persistente, **Secrets Manager** p/ Telegram (env, fora do
+      repo — `notify.telegram_cfg` lê do env), IAM de menor privilégio (Bedrock +
+      segredo + EFS + logs), runbook + steering `deploy.md`. Aprovação remota via
+      Telegram (já pronta). Falta só: aplicar na conta AWS real.
+- [x] 13. Rebrand FOSC→BB-Sentinela (banner/logo ASCII, UI, viewer; pacote interno
+      segue `fosc`).
+- [x] T. Bot do Telegram (`fosc/telegram_bot.py` + `notify.py`): mão-dupla —
+      aprovar/negar o gate por botões inline, `/halt` e `/status`, alertas de ciclo,
+      achado com CVSS/confiança/MITRE, `fosc --telegram-test`, segredos via env.
 
 ## Como validar
 - Offline: `python -m pytest -q`.
