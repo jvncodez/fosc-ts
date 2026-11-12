@@ -1,0 +1,264 @@
+"""Adapta o estado REAL do motor ao shape do front da Ana
+(`web/src/services/api.js`): campaign · policies · plan · commands · approvals ·
+findings · audit.
+
+Camada só de leitura/tradução — NÃO altera a engine de caça. O front não muda de
+estrutura: consome exatamente os mesmos campos do mock, agora com dados reais.
+"""
+import json
+import os
+import signal
+import time
+from pathlib import Path
+
+from . import config
+from .authz import ApprovalStore, operator
+from .state import RunState, list_runs
+
+_SEV = {"critical": "critical", "high": "high", "medium": "medium", "low": "low", "info": "low"}
+_CONF_NUM = {"high": 0.92, "medium": 0.68, "low": 0.4, "alta": 0.92, "media": 0.68, "baixa": 0.4}
+# status da engine -> status do front (draft/running/completed/interrupted)
+_STATUS = {"running": "running", "recon": "running", "sleeping": "running", "paused": "running",
+           "finished": "completed", "done": "completed", "stopped": "interrupted",
+           "halted": "interrupted", "error": "interrupted", "idle": "draft", "none": "draft"}
+
+
+def _fmt(ts) -> str:
+    if not ts:
+        return "—"
+    try:
+        lt, now = time.localtime(float(ts)), time.localtime()
+        hm = time.strftime("%H:%M:%S", lt)
+        return f"Hoje, {hm}" if lt.tm_yday == now.tm_yday and lt.tm_year == now.tm_year \
+            else time.strftime("%d/%m %H:%M", lt)
+    except (ValueError, TypeError, OSError):
+        return "—"
+
+
+def _read_jsonl(path: Path, limit: int | None = None) -> list[dict]:
+    if not path.exists():
+        return []
+    rows = []
+    for line in path.read_text(errors="replace").splitlines():
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows[-limit:] if limit else rows
+
+
+def _asset(url: str) -> str:
+    u = (url or "").replace("https://", "").replace("http://", "")
+    return u.split("/")[0] or u
+
+
+def _conf_num(f: dict) -> float:
+    c = f.get("council") or {}
+    v = c.get("confianca_final") or f.get("confidence") or "medium"
+    return _CONF_NUM.get(str(v).lower(), 0.6)
+
+
+# --------- as 7 coleções do workspace -------------------------------------
+
+def _campaign(st: RunState | None, snap: dict) -> dict:
+    if not st:
+        return {"id": "—", "name": "Nenhuma campanha", "target": "", "status": "draft",
+                "progress": 0, "startedAt": None, "owner": operator()}
+    m = snap["meta"]
+    total = snap.get("surface_total") or 0
+    done = snap.get("done") or 0
+    progress = int(done / total * 100) if total else (100 if snap["status"] in ("finished", "done") else 0)
+    return {"id": st.target, "name": f"Campanha — {st.target}", "target": st.target,
+            "status": _STATUS.get(snap["status"], "running"), "progress": progress,
+            "startedAt": _fmt(m.get("started_at")), "owner": operator(),
+            "cost": round(m.get("cost_usd") or 0, 2), "confirmed": snap.get("confirmed_count") or 0}
+
+
+def _policies() -> dict:
+    # Reflete os tiers determinísticos do authz (passiva/sensível/proibida) + escopo.
+    return {
+        "allowed": [
+            "Recon e enumeração passiva no escopo autorizado",
+            "Mineração de endpoints do bundle JS (SPA)",
+            "Fingerprint e descoberta sem alteração de estado",
+        ],
+        "conditional": [
+            "Teste ativo de vulnerabilidade (exploração) — exige aprovação humana",
+            "Escalada de privilégio após obter execução — exige aprovação humana",
+            "Qualquer ação sensível classificada pelo Authorization Engine",
+        ],
+        "prohibited": [
+            "Sair do escopo autorizado (host pai/irmão/subdomínio)",
+            "Destruição, apagamento ou criptografia de dados",
+            "DoS/DDoS, persistência, exfiltração ou movimentação lateral",
+        ],
+    }
+
+
+def _plan(audit: list[dict]) -> list[dict]:
+    out = []
+    for i, ev in enumerate((e for e in audit if e.get("kind") == "plan"), 1):
+        d = ev.get("data") or {}
+        out.append({
+            "id": f"PLN-{i:02d}",
+            "hypothesis": d.get("hypothesis") or "—",
+            "action": d.get("action") or "—",
+            "expected": d.get("expected_result") or "—",
+            "stop": d.get("stop_condition") or "—",
+            "status": "Registrado antes da ação (trilha de auditoria)",
+            "command": d.get("command") or "",
+        })
+    return out[-40:]
+
+
+def _commands(audit: list[dict]) -> list[dict]:
+    out = []
+    for ev in audit:
+        k, d = ev.get("kind"), ev.get("data") or {}
+        if k == "task":
+            for cmd in (d.get("commands") or [])[:6]:
+                out.append({"id": f"CMD-{len(out)+1}", "time": _fmt(ev.get("ts")),
+                            "command": cmd, "status": "allowed", "planId": None, "approvalId": None,
+                            "actor": ev.get("actor") or "Agente",
+                            "output": [f"veredito: {d.get('verdict', '—')} · {d.get('url', '')}"]})
+        elif k == "scope_block":
+            out.append({"id": f"CMD-{len(out)+1}", "time": _fmt(ev.get("ts")),
+                        "command": d.get("url") or d.get("host") or "(fora de escopo)",
+                        "status": "blocked", "planId": None, "approvalId": None,
+                        "actor": "Política de escopo",
+                        "output": ["Bloqueado: host fora do escopo. Nenhuma requisição foi enviada."]})
+    return out[-120:]
+
+
+def _approvals(st: RunState | None) -> list[dict]:
+    if not st:
+        return []
+    events = _read_jsonl(st.approvals_path)
+    reqs, decisions = {}, {}
+    for e in events:
+        if e.get("type") == "request":
+            reqs[e["id"]] = e
+        elif e.get("type") == "decision":
+            decisions[e["id"]] = e
+    out = []
+    for rid, r in reqs.items():
+        dec = decisions.get(rid)
+        status = "pending" if not dec else ("approved" if dec.get("approved") else "denied")
+        out.append({
+            "id": rid, "planId": None, "title": r.get("context") or r.get("action") or "Ação sensível",
+            "scope": r.get("target") or "", "reason": (dec.get("reason") if dec else None) or r.get("context") or "",
+            "impact": f"risco {r.get('risk', '—')}", "requestedAt": _fmt(r.get("ts")), "status": status,
+        })
+    out.sort(key=lambda a: a["status"] != "pending")  # pendentes primeiro
+    return out
+
+
+def _findings(st: RunState | None, snap: dict) -> list[dict]:
+    if not st:
+        return []
+    out = []
+    for f in snap.get("confirmed") or st.confirmed():
+        out.append({
+            "id": f.get("id") or f.get("url"), "title": f.get("title") or f.get("vuln_class") or "Achado",
+            "asset": _asset(f.get("url")), "severity": _SEV.get((f.get("severity") or "low").lower(), "low"),
+            "confidence": _conf_num(f), "impact": f.get("impact") or f.get("summary") or "",
+            "classification": "confirmed", "evidence": f.get("evidence_marker") or (f.get("summary") or "")[:200],
+            "observedAt": _fmt(f.get("ts")), "council": f.get("council"),
+        })
+    # resultados não confirmados -> inconclusive/discarded (para a aba de achados)
+    for r in snap.get("results") or []:
+        v = r.get("verdict")
+        if v in ("confirmed", "duplicate"):
+            continue
+        out.append({
+            "id": r.get("item_id") or r.get("url"), "title": r.get("vuln_class") or "Hipótese",
+            "asset": _asset(r.get("url")), "severity": _SEV.get((r.get("severity") or "low").lower(), "low"),
+            "confidence": 0.3, "impact": (r.get("summary") or "")[:300],
+            "classification": "inconclusive" if v == "inconclusive" else "discarded",
+            "evidence": (r.get("summary") or "")[:200], "observedAt": _fmt(r.get("ts")), "council": None,
+        })
+    return out
+
+
+_AUDIT_KIND = {"run_start": "campaign", "run_end": "result", "plan": "hypothesis",
+               "task": "command", "finding": "result", "approval": "approval",
+               "scope_block": "decision", "halt": "emergency", "council": "decision",
+               "health_start": "decision", "proxy_start": "decision"}
+_AUDIT_TITLE = {"run_start": "Campanha configurada", "run_end": "Campanha concluída",
+                "plan": "Hipótese registrada", "task": "Ação registrada",
+                "finding": "Achado confirmado", "approval": "Decisão de aprovação",
+                "scope_block": "Bloqueio por escopo", "halt": "Interrupção de emergência",
+                "council": "Parecer do Conselho", "health_start": "Disjuntor ativo",
+                "proxy_start": "Proxy de escopo ativo"}
+
+
+def _audit(audit: list[dict]) -> list[dict]:
+    out = []
+    for ev in reversed(audit[-80:]):
+        k, d = ev.get("kind"), ev.get("data") or {}
+        detail = d.get("context") or d.get("url") or d.get("action") or d.get("status") \
+            or d.get("vuln_class") or json.dumps(d, ensure_ascii=False)[:160]
+        out.append({"id": ev.get("hash", "")[:8] or f"EVT-{len(out)}", "time": _fmt(ev.get("ts")),
+                    "kind": _AUDIT_KIND.get(k, "decision"), "title": _AUDIT_TITLE.get(k, k or "Evento"),
+                    "detail": str(detail)[:240], "actor": ev.get("actor") or "Agente"})
+    return out
+
+
+# --------- API pública -----------------------------------------------------
+
+def _pick(target: str | None) -> RunState | None:
+    if target and config.run_exists(target):
+        return RunState(target)
+    runs = list_runs()
+    return runs[0] if runs else None
+
+
+def workspace(target: str | None = None) -> dict:
+    st = _pick(target)
+    if not st:
+        return {"campaign": _campaign(None, {}), "policies": _policies(), "plan": [],
+                "commands": [], "approvals": [], "findings": [], "audit": []}
+    snap = st.snapshot(results=200, activity=0)
+    audit = _read_jsonl(st.audit_path)
+    return {
+        "campaign": _campaign(st, snap),
+        "policies": _policies(),
+        "plan": _plan(audit),
+        "commands": _commands(audit),
+        "approvals": _approvals(st),
+        "findings": _findings(st, snap),
+        "audit": _audit(audit),
+    }
+
+
+def resolve_approval(target: str, rid: str, decision: str) -> dict:
+    """Espelha `fosc --approve/--deny`: grava a decisão no ApprovalStore, o que
+    desbloqueia o gate que o agente está esperando (authz.require)."""
+    st = _pick(target)
+    if not st:
+        return {"ok": False, "error": "alvo desconhecido"}
+    store = ApprovalStore(st.approvals_path)
+    if not store.request_meta(rid):
+        return {"ok": False, "error": "solicitação não encontrada"}
+    if store.status(rid) in ("approved", "denied"):
+        return {"ok": False, "error": "esta solicitação já foi resolvida"}
+    approved = decision == "approved"
+    store.decide(rid, approved, operator(), "decisão pelo painel")
+    return {"ok": True, "id": rid, "status": "approved" if approved else "denied"}
+
+
+def halt(target: str) -> dict:
+    """Espelha `fosc --halt`: parada de emergência — encerra tarefas em voo AGORA,
+    preserva evidências e trilha."""
+    st = _pick(target)
+    if not st:
+        return {"ok": False, "error": "alvo desconhecido"}
+    st.halt_path.write_text("HALT\n")
+    st.pause_path.unlink(missing_ok=True)
+    pid = st.read_meta().get("pid")
+    if pid:
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    return {"ok": True, "target": st.target}

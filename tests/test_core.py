@@ -242,12 +242,9 @@ class ViewerGuardTests(unittest.TestCase):
         self.assertIn("targets", json.loads(body))
         self.assertEqual(self._req("/")[0], 200)
         from fosc import webview
-        js = "/js/app.js" if "/js/app.js" in webview.STATIC else "/app.js"
+        js = next((k for k in webview.STATIC if k.endswith("app.js")), None)
+        self.assertIsNotNone(js)              # qualquer front servido tem um app.js
         self.assertEqual(self._req(js)[0], 200)
-        if "/js/mock.js" in webview.STATIC:   # new FOSC/TS front: demo mock is OFF when served live
-            code, body = self._req("/js/mock.js")
-            self.assertEqual(code, 200)
-            self.assertNotIn(b"FOSC_MOCK", body)
 
     def test_bad_host_rejected(self):
         self.assertEqual(self._req("/api/overview", headers={"Host": "evil.test"})[0], 403)
@@ -1278,3 +1275,69 @@ class CouncilDecideTests(unittest.TestCase):
                      _parecer("governanca", ok=False, veto=True)], "medium", "medium")
         self.assertTrue(d["aprovado"])
         self.assertEqual(d["cadeiras_ok"], 1)
+
+
+class WsViewTests(unittest.TestCase):
+    """Adaptador motor -> shape do front da Ana (campaign/policies/plan/commands/
+    approvals/findings/audit). Leitura pura, sem tocar na engine."""
+
+    def test_empty_workspace_has_all_collections(self):
+        isolate(self)
+        from fosc import wsview
+        ws = wsview.workspace(None)
+        self.assertEqual(set(ws), {"campaign", "policies", "plan", "commands",
+                                   "approvals", "findings", "audit"})
+        self.assertEqual(ws["campaign"]["status"], "draft")
+        self.assertEqual(ws["findings"], [])
+        # as 3 listas de política sempre existem (allowed/conditional/prohibited)
+        self.assertTrue(ws["policies"]["allowed"] and ws["policies"]["prohibited"])
+
+    def test_real_run_maps_to_front_shape(self):
+        isolate(self)
+        from fosc.state import RunState
+        from fosc.authz import ApprovalStore
+        from fosc import wsview
+        t = "alvo.example.com"
+        st = RunState(t)
+        st.write_meta(target=t, status="running", started_at=1700000000.0)
+        st.add_confirmed({"url": f"https://{t}/login", "vuln_class": "SQLi",
+                          "severity": "high", "title": "SQLi no login", "summary": "resumo",
+                          "impact": "impacto", "evidence_marker": "admin@x", "confidence": "high"})
+        ApprovalStore(st.approvals_path).request("active-hunt", t, "sensitive", "iniciar teste ativo")
+        ws = wsview.workspace(t)
+        self.assertEqual(ws["campaign"]["status"], "running")
+        self.assertEqual(ws["campaign"]["target"], t)
+        conf = [f for f in ws["findings"] if f["classification"] == "confirmed"]
+        self.assertEqual(len(conf), 1)
+        self.assertEqual(conf[0]["severity"], "high")
+        self.assertEqual(conf[0]["asset"], t)
+        self.assertGreaterEqual(conf[0]["confidence"], 0.9)   # "high" -> número
+        pend = [a for a in ws["approvals"] if a["status"] == "pending"]
+        self.assertEqual(len(pend), 1)
+        self.assertEqual(pend[0]["title"], "iniciar teste ativo")
+
+    def test_resolve_approval_unblocks_and_is_idempotent(self):
+        isolate(self)
+        from fosc.state import RunState
+        from fosc.authz import ApprovalStore
+        from fosc import wsview
+        t = "alvo2.example.com"
+        st = RunState(t)
+        st.write_meta(target=t, status="running")
+        rid = ApprovalStore(st.approvals_path).request("active-hunt", t, "sensitive", "ctx")
+        r = wsview.resolve_approval(t, rid, "approved")
+        self.assertTrue(r["ok"])
+        self.assertEqual(ApprovalStore(st.approvals_path).status(rid), "approved")
+        # idempotente: decidir de novo é recusado
+        self.assertFalse(wsview.resolve_approval(t, rid, "denied")["ok"])
+
+    def test_halt_writes_emergency_file(self):
+        isolate(self)
+        from fosc.state import RunState
+        from fosc import wsview
+        t = "alvo3.example.com"
+        st = RunState(t)
+        st.write_meta(target=t, status="running")
+        r = wsview.halt(t)
+        self.assertTrue(r["ok"])
+        self.assertTrue(st.halt_path.exists())

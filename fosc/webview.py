@@ -26,21 +26,32 @@ from .notify import send_telegram
 from .state import RunState, list_runs
 
 _JS = "application/javascript; charset=utf-8"
-# Front FOSC/TS (web/ na raiz do repo, mantido pela equipe de design) quando
-# existe; senão o painel legado em fosc/web. Fixed whitelist — no path traversal.
+_CSS = "text/css; charset=utf-8"
+# Front oficial (anadevfs) em web/ na raiz: SPA ES-module servido por esta
+# whitelist fixa (sem path traversal). O api.js em modo live consome a API real
+# deste viewer. Fallbacks: front antigo em web/ e o legado em fosc/web.
 _FRONT = Path(__file__).resolve().parent.parent / "web"
-if (_FRONT / "index.html").is_file():
+if (_FRONT / "src" / "app.js").is_file():
     WEB_DIR = _FRONT
     STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
-              "/css/app.css": ("css/app.css", "text/css; charset=utf-8"),
+              "/styles.css": ("styles.css", _CSS),
+              "/tokens.css": ("tokens.css", _CSS),
+              "/features.css": ("features.css", _CSS),
+              "/terminal.css": ("terminal.css", _CSS),
+              "/assets/fosc-ts.svg": ("assets/fosc-ts.svg", "image/svg+xml"),
+              "/src/app.js": ("src/app.js", _JS),
+              "/src/services/api.js": ("src/services/api.js", _JS)}
+elif (_FRONT / "index.html").is_file():
+    WEB_DIR = _FRONT
+    STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
+              "/css/app.css": ("css/app.css", _CSS),
               "/js/app.js": ("js/app.js", _JS),
               "/assets/logo.svg": ("assets/logo.svg", "image/svg+xml"),
-              # modo demo desligado: servido pelo agente, o front usa a API real
               "/js/mock.js": (None, _JS)}
 else:
     WEB_DIR = Path(__file__).resolve().parent / "web"
     STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
-              "/app.css": ("app.css", "text/css; charset=utf-8"),
+              "/app.css": ("app.css", _CSS),
               "/app.js": ("app.js", _JS),
               "/logo.svg": ("logo.svg", "image/svg+xml")}
 TARGET_RX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-:/_]{0,250}$")
@@ -258,6 +269,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send(body, ctype)
         if u.path == "/api/overview":
             return self._json(overview())
+        if u.path == "/api/workspace":
+            from . import wsview
+            return self._json(wsview.workspace(q.get("target")))
         if u.path == "/api/state":
             if not q.get("target"):
                 return self._json({"error": "target obrigatório"}, 400)
@@ -295,6 +309,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._json(start_hunt(p))
             if path == "/api/control":
                 return self._json(control(p))
+            if path == "/api/approval":
+                from . import wsview
+                return self._json(wsview.resolve_approval(
+                    (p.get("target") or "").strip(), str(p.get("id") or ""), str(p.get("decision") or "")))
+            if path == "/api/halt":
+                from . import wsview
+                return self._json(wsview.halt((p.get("target") or "").strip()))
             if path == "/api/chat":
                 return self._json(chat_send(p))
             if path == "/api/config":

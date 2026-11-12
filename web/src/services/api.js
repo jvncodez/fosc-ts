@@ -3,7 +3,9 @@
  * Nenhum endpoint ou contrato definitivo do backend está presumido.
  */
 export const API_BASE_URL = '';
-export const DATA_MODE = 'mock';
+// 'live' quando servido pelo viewer do agente (API real em /api/*); cai para
+// 'mock' sozinho se os endpoints não existirem (demo standalone da Ana segue ok).
+export const DATA_MODE = 'live';
 
 const state = {
   campaign: { id: 'CMP-2026-001', name: 'Avaliação do Portal SeguroLab', target: 'portal.securelab.com.br', status: 'draft', progress: 0, startedAt: null, owner: 'Alex Costa', scopeId: 'SCP-001' },
@@ -66,7 +68,7 @@ const liveSteps = [
 const pushEvent = (kind, title, detail, actor = 'Alex Costa') => state.audit.unshift({ id: `EVT-${String(Date.now()).slice(-6)}`, time: `Hoje, ${new Intl.DateTimeFormat('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date())}`, kind, title, detail, actor });
 const pause = (ms = 130) => new Promise(resolve => setTimeout(resolve, ms));
 
-export const api = {
+const mockApi = {
   async getWorkspace() { await pause(); return cloneState(); },
   async updateTarget(target) {
     await pause();
@@ -151,3 +153,78 @@ export function subscribeToUpdates(url, onUpdate, onError = () => {}) {
   stream.onerror = () => onError(new Error('Conexão de atualizações interrompida.'));
   return () => stream.close();
 }
+
+/* ============================================================================
+ * Modo LIVE — consome a API real do viewer do agente (fosc/webview.py).
+ * Mesma interface do mock; cai para o mock se os endpoints não existirem
+ * (a demo standalone da Ana continua funcionando). Não altera app.js/CSS.
+ * ========================================================================== */
+const live = { target: null, confirmedIds: null };
+
+async function jget(path) {
+  const r = await fetch(path, { headers: { Accept: 'application/json' } });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+async function jpost(path, body) {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-FOSC': '1' }, body: JSON.stringify(body || {}) });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+// Popup quando um achado é CONFIRMADO — usa o #toast-region do front da Ana.
+function vulnToast(f) {
+  const region = document.getElementById('toast-region');
+  if (!region) return;
+  const el = document.createElement('div');
+  el.className = 'toast toast-finding';
+  el.textContent = `🐛 Vuln confirmada · ${String(f.severity || '').toUpperCase()} · ${f.title}`;
+  region.append(el);
+  setTimeout(() => el.remove(), 6000);
+}
+function noteFindings(ws) {
+  const confirmed = (ws.findings || []).filter(f => f.classification === 'confirmed');
+  const ids = new Set(confirmed.map(f => f.id));
+  if (live.confirmedIds !== null) {               // não dispara toast retroativo na 1ª carga
+    for (const f of confirmed) if (!live.confirmedIds.has(f.id)) vulnToast(f);
+  }
+  live.confirmedIds = ids;
+}
+
+const liveApi = {
+  async getWorkspace() {
+    try {
+      const ws = await jget(`/api/workspace${live.target ? `?target=${encodeURIComponent(live.target)}` : ''}`);
+      live.target = ws.campaign?.target || live.target;
+      noteFindings(ws);
+      return ws;
+    } catch { return mockApi.getWorkspace(); }
+  },
+  async advanceCampaign() { return this.getWorkspace(); }, // o motor avança sozinho; aqui só re-busca (+toast)
+  async updateTarget(target) {
+    live.target = String(target || '').trim().replace(/^https?:\/\//, '');
+    live.confirmedIds = null;
+    return this.getWorkspace();
+  },
+  async startCampaign({ target, authorized }) {
+    if (!authorized) throw new Error('Confirme a autorização antes de iniciar.');
+    try {
+      const r = await jpost('/api/hunt', { target: String(target || '').trim() });
+      if (r.error) throw new Error(r.error);
+      live.target = String(target || '').trim().replace(/^https?:\/\//, ''); live.confirmedIds = null;
+      return this.getWorkspace();
+    } catch (e) { if (/^HTTP /.test(e.message)) return mockApi.startCampaign({ target, authorized }); throw e; }
+  },
+  async emergencyStop() {
+    try { await jpost('/api/halt', { target: live.target }); return this.getWorkspace(); }
+    catch { return mockApi.emergencyStop(); }
+  },
+  async resolveApproval(id, decision) {
+    const r = await jpost('/api/approval', { target: live.target, id, decision });
+    if (r.error) throw new Error(r.error);
+    return this.getWorkspace();
+  },
+  async requestApproval() { return this.getWorkspace(); }, // no live, os pedidos nascem do agente
+};
+
+export const api = DATA_MODE === 'live' ? liveApi : mockApi;
