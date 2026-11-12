@@ -89,6 +89,28 @@ Verifique a integridade da cadeia a qualquer momento:
 fosc --audit -a <TARGET>     # imprime a trilha e diz ÍNTEGRA ✓ / VIOLADA ✗
 ```
 
+## Arsenal de pentest
+
+A imagem traz o arsenal completo no PATH (o agente descobre o que está instalado
+via `toolrunner.arsenal_note()` e usa via Bash):
+
+| Categoria | Ferramentas |
+|-----------|-------------|
+| Subdomínios/DNS | subfinder, assetfinder, dnsx |
+| Descoberta HTTP | httpx, katana, gau, waybackurls, hakrawler |
+| Portas/serviços | **nmap**, masscan |
+| Conteúdo/fuzzing | ffuf, feroxbuster, gobuster, dirsearch |
+| Scan de vulnerabilidade | nuclei (+templates), nikto |
+| Exploração web | sqlmap, dalfox, arjun |
+| Fingerprint/WAF | whatweb, wafw00f |
+| Wordlists | SecLists/Discovery em `/usr/share/seclists` |
+
+Para instalar o mesmo arsenal na sua máquina local (dev): `bash scripts/install-tools.sh`.
+
+> ⚠️ **Escopo e scanners de porta:** `nmap`/`masscan` fazem TCP cru e **não passam
+> pelo proxy de escopo** (que é HTTP). Em produção, restrinja a saída do container
+> no **security group / NACL** aos IPs do alvo. Ver `.kiro/steering/deploy.md`.
+
 ## Variáveis de ambiente (contrato do container)
 
 | Env | Papel |

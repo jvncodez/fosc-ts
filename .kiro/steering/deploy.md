@@ -31,3 +31,16 @@ Execução headless na AWS (Fargate + Bedrock). Artefatos em `deploy/` (ver
 - Troca/adição de modelo é configuração (env `BEDROCK_*` + `SENTINELA_PROVIDER`),
   nunca mudança de código — ver `fosc/models.py` e `tech.md`. O failover cobre um
   modelo que falhe/recuse/fique lento.
+
+## Arsenal e escopo em camadas (IMPORTANTE)
+- O container traz o arsenal completo (recon, enumeração, portas, fuzzing,
+  exploração) — ver `deploy/Dockerfile` e `scripts/install-tools.sh`. O agente é
+  informado do que está no PATH via `toolrunner.arsenal_note()` e usa via Bash.
+- **O proxy de escopo só cobre HTTP/HTTPS (CONNECT).** `nmap`/`masscan`/`naabu`
+  fazem TCP cru e **passam por fora dele**. Portanto:
+  - O escopo para essas ferramentas é garantido pelo **note determinístico** no
+    prompt (nível de agente), NÃO pela rede.
+  - Em produção, feche a saída do container no **security group / NACL** para os
+    IPs/portas do alvo autorizado — essa é a contenção de rede para não-HTTP.
+  - Três camadas somadas: fila determinística (recon) + proxy HTTP (G0) + egress
+    firewall (não-HTTP). Nenhuma sozinha é suficiente; juntas, fuga é inviável.

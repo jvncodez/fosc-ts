@@ -15,7 +15,7 @@ researchable lead to resume from.
 import time
 from pathlib import Path
 
-from . import config, knowledge, models
+from . import config, knowledge, models, toolrunner
 from .prompts import PRIVESC_SCHEMA, PRIVESC_SYSTEM, build_privesc_prompt
 
 # fields worth mining a confirmed finding for leaked credentials/secrets
@@ -147,6 +147,9 @@ def _one_pass(state, target, scope_note, finding, exec_howto, looted, prior,
     arsenal = knowledge.read_tools()
     if arsenal:
         prompt += f"\nArsenal já instalado pelo FOSC (reutilize em vez de reinstalar):\n{arsenal}\n"
+    tools_note = toolrunner.arsenal_note()
+    if tools_note:
+        prompt += f"\n{tools_note}\n"
     run = models.run(
         "privesc",
         prompt,

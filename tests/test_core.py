@@ -794,5 +794,33 @@ class TelegramTests(unittest.TestCase):
         self.assertEqual(captured["buttons"][0][1][1], "deny:rid9")      # ❌ button
 
 
+class ArsenalTests(unittest.TestCase):
+    def test_arsenal_note_lists_present_tools(self):
+        from fosc import toolrunner
+        orig = toolrunner.have
+        toolrunner.have = lambda b: b in {"nmap", "httpx", "sqlmap"}
+        try:
+            found = toolrunner.arsenal_on_path()
+            note = toolrunner.arsenal_note()
+        finally:
+            toolrunner.have = orig
+        self.assertIn("nmap", note)
+        self.assertIn("httpx", note)
+        self.assertIn("sqlmap", note)
+        flat = {t for ts in found.values() for t in ts}
+        self.assertEqual(flat, {"nmap", "httpx", "sqlmap"})
+        self.assertIn("escopo", note.lower())                 # reminder not to leave scope
+
+    def test_arsenal_empty_when_nothing_installed(self):
+        from fosc import toolrunner
+        orig = toolrunner.have
+        toolrunner.have = lambda b: False
+        try:
+            self.assertEqual(toolrunner.arsenal_note(), "")
+            self.assertEqual(toolrunner.arsenal_on_path(), {})
+        finally:
+            toolrunner.have = orig
+
+
 if __name__ == "__main__":
     unittest.main()

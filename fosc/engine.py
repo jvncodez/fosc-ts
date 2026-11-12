@@ -12,7 +12,7 @@ import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from . import audit, claude_runner, config, knowledge, models, net, plan
+from . import audit, claude_runner, config, knowledge, models, net, plan, toolrunner
 from .notify import notify_finding
 from .privesc import attempt_privesc
 from .prompts import (CONSOLIDATE_SCHEMA, CONSOLIDATE_SYSTEM, HUNT_SCHEMA, HUNT_SYSTEM,
@@ -59,6 +59,9 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
     if arsenal:
         learned = (learned + "\n\nArsenal já instalado pelo FOSC em runs anteriores (reutilize em vez de "
                    "reinstalar):\n" + arsenal).strip()
+    tools_note = toolrunner.arsenal_note()
+    if tools_note:
+        learned = (learned + "\n\n" + tools_note).strip()
     prompt = build_hunt_prompt(target, scope_note, item, classes, learned, _js_for(item, surface), extra_headers)
 
     commands: list[str] = []
