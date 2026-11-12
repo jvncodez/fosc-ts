@@ -108,6 +108,7 @@ class RunState:
         self.log_path = self.dir / "hunt.log"
         self.privesc_path = self.dir / "privesc.json"
         self.claims_path = self.dir / "claims.json"
+        self.approvals_path = self.dir / "approvals.jsonl"  # human-in-the-loop custody log
         self._lock = threading.Lock()
         if fresh:
             for p in (self.done_path, self.results_path, self.confirmed_path, self.active_path,

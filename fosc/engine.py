@@ -20,11 +20,25 @@ from .prompts import (CONSOLIDATE_SCHEMA, CONSOLIDATE_SYSTEM, HUNT_SCHEMA, HUNT_
 from .rank import rank, suggest_classes
 from .recon import load_or_build, item_id, route_pattern, target_host
 from .scope import Scope
+from .authz import ApprovalStore, require
 from . import mitre
 from .report import write_report
 from .state import RunState
 from .ui import Out
 from .verify import verify_finding
+
+
+def _privesc_approved(state, out, target, act) -> bool:
+    """Human-in-the-loop gate for the (highly sensitive) privesc stage. Runs in a
+    worker thread, so it never prompts inline — it records a pending request and
+    waits for `fosc --approve <id>` (or the panel). yolo mode auto-approves."""
+    dec = require(ApprovalStore(state.approvals_path), "privilege-escalation",
+                  target_host(target), "RCE confirmado; autorizar escalonamento de privilégio no host",
+                  interactive=False, on_notice=lambda m: (act(m), out.warn(m)))
+    if not dec.approved:
+        act(f"escalonamento NÃO autorizado ({dec.status}) — privesc ignorado")
+        state.activity(None, f"privesc não autorizado ({dec.status})", kind="system")
+    return dec.approved
 
 
 def _js_for(item: dict, surface: dict) -> list[str]:
@@ -124,7 +138,9 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
                     out.confirmed(finding)
                     # Post-RCE: if this finding gives command execution, run the
                     # privilege-escalation stage once for the whole host.
-                    if finding.get("shell_obtained") and finding.get("shell_howto") and state.claim_privesc():
+                    if (finding.get("shell_obtained") and finding.get("shell_howto")
+                            and state.claim_privesc()
+                            and _privesc_approved(state, out, target, act)):
                         act("RCE confirmado — iniciando escalonamento de privilégio")
                         state.set_active(item, "privesc")
                         try:
@@ -223,6 +239,8 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
 
     round_no = 0
     final_status = "finished"
+    hunt_authorized = False
+    approvals = ApprovalStore(state.approvals_path)
     try:
         while not state.should_stop():
             round_no += 1
@@ -249,6 +267,23 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
                 out.info(f"queue empty, sleeping {interval}s before re-recon")
                 _sleep_interruptible(state, interval)
                 continue
+
+            # Human-in-the-loop: active testing is a sensitive action. Stop and ask
+            # for authenticated human approval once, before the first live test.
+            if config.AUTHZ_HUNT_GATE and not hunt_authorized:
+                out.stop_live()
+                dec = require(approvals, "active-hunt", scope.label(),
+                              f"iniciar teste ATIVO de {len(todo)} endpoint(s) no escopo autorizado",
+                              on_notice=lambda m: (state.activity(None, m, kind="system"), out.warn(m)))
+                out.start_live()
+                if not dec.approved:
+                    out.warn(f"teste ativo NÃO autorizado ({dec.status}) — encerrando sem testar nada.")
+                    state.activity(None, f"autorização de teste ativo negada/expirada ({dec.status})", kind="system")
+                    final_status = "denied"
+                    break
+                hunt_authorized = True
+                state.activity(None, f"teste ativo AUTORIZADO por {dec.approver or 'operador'} (id {dec.id})", kind="system")
+                out.info(f"teste ativo autorizado por {dec.approver or 'operador'}")
 
             state.write_meta(status="running", round_total=len(todo), round_done=0)
             state.activity(None, f"round {round_no}: {len(todo)} endpoint(s) queued", kind="system")

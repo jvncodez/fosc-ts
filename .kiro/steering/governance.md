@@ -41,6 +41,8 @@ pare e peça confirmação humana.
 
 ## Mapa dos 4 módulos (arquitetura da palestra)
 - **Scope Manager** → `fosc/scope.py` (feito).
-- **Authorization Engine** → gate de human-in-the-loop (a fazer).
-- **Execution Engine** → `fosc/engine.py` (gated por escopo; falta gate de autorização).
-- **Audit & Evidence Manager** → trilha de custódia JSONL (a fazer).
+- **Authorization Engine** → `fosc/authz.py` (feito): gate antes de teste ativo e de
+  privesc; aprovação via `fosc --approve/--deny --id`; modos ask/yolo/paranoid.
+- **Execution Engine** → `fosc/engine.py` (gated por escopo E por autorização).
+- **Audit & Evidence Manager** → trilha append-only já começa em `approvals.jsonl`;
+  falta generalizar (req/acesso/evidência + encadeamento por hash) (a fazer).

@@ -77,6 +77,14 @@ NET_WATCHDOG_SECS = 25
 # routes to a crawler, so without this the hunt queue is empty).
 JS_MINING = True
 
+# Authorization Engine (human-in-the-loop). mode: ask (default, require human
+# approval for sensitive actions) | yolo (auto-approve, lab only) | paranoid
+# (approve everything). AUTHZ_HUNT_GATE also gates the start of active hunting.
+AUTHZ_MODE = "ask"
+AUTHZ_HUNT_GATE = True      # ask once per run before active testing begins
+AUTHZ_TIMEOUT = 1800        # headless: seconds to wait for a human decision
+AUTHZ_POLL = 2              # headless: seconds between checks of the approvals log
+
 VULN_BUNDLE = [
     "IDOR", "broken auth / session handling", "SSRF", "XSS (reflected/stored/DOM)",
     "SQLi / NoSQLi", "open redirect", "path traversal / LFI", "SSTI",

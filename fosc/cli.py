@@ -147,6 +147,12 @@ def build_parser() -> argparse.ArgumentParser:
                          help="retomar a paused hunt")
     action.add_argument("--shell", dest="action", action="store_const", const="shell",
                          help="reverse shell: sobe túnel ngrok + listener e dispara a RCE do alvo (ou --exec)")
+    action.add_argument("--approvals", dest="action", action="store_const", const="approvals",
+                         help="listar pedidos de autorização pendentes (human-in-the-loop)")
+    action.add_argument("--approve", dest="action", action="store_const", const="approve",
+                         help="aprovar um pedido de autorização (use com --id)")
+    action.add_argument("--deny", dest="action", action="store_const", const="deny",
+                         help="negar um pedido de autorização (use com --id)")
 
     p.add_argument("-a", "--alvo", dest="target", default=None,
                     help="alvo: target domain or URL, e.g. alvo.com or https://app.alvo.com "
@@ -193,6 +199,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="with --shell: provider do túnel TCP (auto=pinggy e depois ngrok; ngrok TCP exige cartão)")
     p.add_argument("--urlencode", action="store_true",
                     help="with --shell: url-encoda o payload ao injetar no __CMD__ (canais via URL)")
+    p.add_argument("--id", dest="approval_id", default=None,
+                    help="with --approve/--deny: id do pedido (veja 'fosc --approvals')")
+    p.add_argument("--reason", default="", help="with --approve/--deny: motivo da decisão")
     return p
 
 
@@ -206,6 +215,63 @@ def do_shell(args):
                                listener=args.listener, urlencode=args.urlencode, provider=args.tunnel))
 
 
+def _find_approval(aid: str):
+    from .authz import ApprovalStore
+    if not config.STATE_ROOT.exists():
+        return None, None
+    for d in sorted(config.STATE_ROOT.iterdir()):
+        if not d.is_dir():
+            continue
+        store = ApprovalStore(d / "approvals.jsonl")
+        if store.request_meta(aid):
+            return store, d.name
+    return None, None
+
+
+def do_approvals(args):
+    from .authz import ApprovalStore
+    if args.target:
+        roots = [RunState(args.target).dir]
+    elif config.STATE_ROOT.exists():
+        roots = [d for d in sorted(config.STATE_ROOT.iterdir()) if d.is_dir()]
+    else:
+        roots = []
+    found = False
+    for d in roots:
+        for r in ApprovalStore(d / "approvals.jsonl").pending():
+            found = True
+            import time as _t
+            age = int(_t.time() - r.get("ts", 0))
+            print(f"[{r['id']}] {d.name} · {r['action']} (risco {r['risk']}, {age}s atrás)\n"
+                  f"        {r.get('context','')}\n"
+                  f"        aprovar: fosc --approve --id {r['id']}   |   negar: fosc --deny --id {r['id']}")
+    if not found:
+        print("nenhum pedido de autorização pendente.")
+
+
+def _decide(args, approved: bool):
+    from .authz import operator
+    if not args.approval_id:
+        print("informe --id <id> (veja 'fosc --approvals')")
+        return
+    store, tgt = _find_approval(args.approval_id)
+    if not store:
+        print(f"id {args.approval_id} não encontrado em nenhum run.")
+        return
+    who = operator()
+    store.decide(args.approval_id, approved, who, args.reason)
+    print(f"{'✓ APROVADO' if approved else '✗ NEGADO'} {args.approval_id} ({tgt}) por {who}"
+          + (f" — {args.reason}" if args.reason else ""))
+
+
+def do_approve(args):
+    _decide(args, True)
+
+
+def do_deny(args):
+    _decide(args, False)
+
+
 DISPATCH = {
     "hunt": do_hunt,
     "chat": do_chat,
@@ -217,13 +283,18 @@ DISPATCH = {
     "pause": do_pause,
     "resume": do_resume,
     "shell": do_shell,
+    "approvals": do_approvals,
+    "approve": do_approve,
+    "deny": do_deny,
 }
+
+_NO_TARGET = ("view", "chat", "shell", "approvals", "approve", "deny")
 
 
 def main():
     parser = build_parser()
     args = parser.parse_args()
-    if args.action not in ("view", "chat", "shell") and not args.target:
+    if args.action not in _NO_TARGET and not args.target:
         parser.error("-a/--alvo is required for this action")
     print_banner()
     DISPATCH[args.action](args)

@@ -5,6 +5,7 @@ import time
 import unittest
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from fosc import config, knowledge
 from fosc.claude_runner import describe_event, run_claude
@@ -362,6 +363,67 @@ class MitreTests(unittest.TestCase):
         self.assertEqual(mitre.tag("some unknown class"), "T1190")    # default
         rows = mitre.techniques("local file inclusion")
         self.assertTrue(all({"id", "name", "tactic"} <= r.keys() for r in rows))
+
+
+class AuthzTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        from fosc.authz import ApprovalStore
+        self.store = ApprovalStore(Path(tempfile.mkdtemp(prefix="authz-")) / "approvals.jsonl")
+
+    def test_risk_classification(self):
+        from fosc.authz import risk
+        self.assertEqual(risk("recon"), "passive")
+        self.assertEqual(risk("active-hunt"), "sensitive")
+        self.assertEqual(risk("privilege-escalation"), "sensitive")
+        self.assertEqual(risk("something-new"), "sensitive")  # unknown -> fail safe
+
+    def test_store_request_decide_status(self):
+        rid = self.store.request("active-hunt", "app.test", "sensitive", "ctx")
+        self.assertEqual(self.store.status(rid), "pending")
+        self.assertEqual([r["id"] for r in self.store.pending()], [rid])
+        self.store.decide(rid, True, "alice", "ok")
+        self.assertEqual(self.store.status(rid), "approved")
+        self.assertEqual(self.store.pending(), [])
+
+    def test_require_auto_approves_passive(self):
+        from fosc.authz import require
+        d = require(self.store, "recon", "app.test", mode="ask", interactive=False)
+        self.assertTrue(d.approved)
+        self.assertEqual(d.status, "auto")
+
+    def test_require_yolo_approves_sensitive(self):
+        from fosc.authz import require
+        d = require(self.store, "exploit", "app.test", mode="yolo", interactive=False)
+        self.assertTrue(d.approved)
+
+    def test_require_sensitive_blocks_then_pending(self):
+        from fosc.authz import require
+        d = require(self.store, "active-hunt", "app.test", mode="ask",
+                    interactive=False, wait=False)
+        self.assertFalse(d.approved)
+        self.assertEqual(d.status, "pending")
+        # a human approves out-of-band -> status flips, next check sees it
+        self.store.decide(d.id, True, "bob", "autorizado")
+        self.assertEqual(self.store.status(d.id), "approved")
+
+    def test_require_headless_wait_sees_approval(self):
+        from fosc.authz import require
+        import threading
+        rid_box = {}
+
+        def approve_soon():
+            import time as _t
+            _t.sleep(0.3)
+            p = self.store.pending()
+            if p:
+                rid_box["id"] = p[0]["id"]
+                self.store.decide(p[0]["id"], True, "carol")
+
+        threading.Thread(target=approve_soon, daemon=True).start()
+        d = require(self.store, "db-scan", "app.test", mode="ask",
+                    interactive=False, wait=True, timeout=5)
+        self.assertTrue(d.approved)
 
 
 class ComposerTests(unittest.TestCase):
