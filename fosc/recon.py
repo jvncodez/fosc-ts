@@ -17,7 +17,7 @@ from urllib.parse import urlparse, parse_qs
 
 from . import config
 from .scope import Scope
-from .toolrunner import run_lines, have
+from .toolrunner import run_lines, run_proc, have
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 _HEX = re.compile(r"^[0-9a-f]{16,}$", re.I)
@@ -118,11 +118,12 @@ def discover_hosts(target: str, timeout: int) -> list[dict]:
     hosts = []
     if have("httpx"):
         try:
-            proc = subprocess.run(
-                ["httpx", "-silent", "-json", "-td", "-title", "-sc"],
-                input="\n".join(candidates), capture_output=True, text=True, timeout=timeout,
+            _, stdout, _ = run_proc(
+                ["httpx", "-silent", "-json", "-td", "-title", "-sc",
+                 "-rl", str(config.RECON_RATE), "-t", str(config.RECON_THREADS)],
+                input="\n".join(candidates), timeout=timeout,
             )
-            for line in proc.stdout.splitlines():
+            for line in stdout.splitlines():
                 try:
                     rec = json.loads(line)
                 except json.JSONDecodeError:
@@ -149,7 +150,8 @@ def collect_urls(target: str, hosts: list[dict], timeout: int) -> set[str]:
         for h in hosts:
             found.update(
                 l.strip() for l in run_lines(
-                    ["katana", "-u", h["url"], "-silent", "-jc", "-kf", "all", "-d", "3"], timeout)
+                    ["katana", "-u", h["url"], "-silent", "-jc", "-kf", "all", "-d", "3",
+                     "-rl", str(config.RECON_RATE), "-c", str(config.RECON_THREADS), "-p", "1"], timeout)
                 if l.strip().startswith("http")
             )
     root = target_host(target)
@@ -276,7 +278,7 @@ def content_discovery(target: str, hosts: list[dict], timeout: int) -> set[str]:
             lines = run_lines(
                 ["feroxbuster", "-u", base, "-w", wl, "-x", config.CONTENT_EXTENSIONS,
                  "-d", str(config.CONTENT_DEPTH), "-s", config.CONTENT_STATUS,
-                 "-t", "40", "--time-limit", f"{timeout}s", "--silent", "-k",
+                 "-t", str(config.RECON_THREADS), "--rate-limit", str(config.RECON_RATE), "--time-limit", f"{timeout}s", "--silent", "-k",
                  "--no-state"], timeout + 20)
             found.update(l.strip() for l in lines if l.strip().startswith("http"))
         elif have("ffuf"):
@@ -297,11 +299,11 @@ def _ffuf_base(base: str, wordlist: str, timeout: int) -> set[str]:
     with tempfile.NamedTemporaryFile("r", suffix=".json", delete=False) as tf:
         path = tf.name
     try:
-        subprocess.run(
+        run_proc(
             ["ffuf", "-u", f"{base}/FUZZ", "-w", wordlist, "-e", exts,
-             "-mc", config.CONTENT_STATUS, "-ac", "-t", "40", "-maxtime", str(timeout),
-             "-of", "json", "-o", path, "-s"],
-            capture_output=True, text=True, timeout=timeout + 20, check=False)
+             "-mc", config.CONTENT_STATUS, "-ac", "-t", str(config.RECON_THREADS), "-rate", str(config.RECON_RATE),
+             "-maxtime", str(timeout), "-of", "json", "-o", path, "-s"],
+            timeout=timeout + 20)
         data = json.loads(open(path).read() or "{}")
         for r in data.get("results", []):
             if r.get("url"):
@@ -320,9 +322,10 @@ def run_nuclei(hosts: list[dict], timeout: int) -> list[dict]:
     if not have("nuclei") or not hosts:
         return []
     try:
-        proc = subprocess.run(
-            ["nuclei", "-silent", "-jsonl", "-severity", "medium,high,critical", "-nc"],
-            input="\n".join(h["url"] for h in hosts), capture_output=True, text=True, timeout=timeout,
+        _, nuclei_out, _ = run_proc(
+            ["nuclei", "-silent", "-jsonl", "-severity", "medium,high,critical", "-nc",
+             "-rl", str(config.RECON_RATE), "-c", str(config.RECON_THREADS), "-bs", str(config.RECON_THREADS), "-timeout", "10", "-retries", "1", "-mhe", "10"],
+            input="\n".join(h["url"] for h in hosts), timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         print(f"[fosc] nuclei timed out after {timeout}s, continuing without it")
@@ -331,7 +334,7 @@ def run_nuclei(hosts: list[dict], timeout: int) -> list[dict]:
         print(f"[fosc] nuclei failed: {e}")
         return []
     hits = []
-    for line in proc.stdout.splitlines():
+    for line in nuclei_out.splitlines():
         try:
             rec = json.loads(line)
         except json.JSONDecodeError:
@@ -407,5 +410,11 @@ def load_or_build(target: str, run_dir, fresh: bool = False, nuclei: bool = True
                 surface["items"] += [it for it in old.get("items", []) if it.get("pattern") not in known]
         except json.JSONDecodeError:
             pass
+    from . import toolrunner
+    if toolrunner.HOLD.is_set():
+        # halt/disjuntor interrompeu o recon: superfície parcial NÃO vai para o cache,
+        # senão a próxima caçada reaproveitaria um recon incompleto.
+        print("[fosc] recon interrompido (halt/disjuntor) — superfície parcial não foi salva")
+        return surface
     cache.write_text(json.dumps(surface, indent=2))
     return surface

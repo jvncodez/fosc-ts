@@ -12,7 +12,7 @@ import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from . import audit, claude_runner, config, knowledge, models, net, plan, toolrunner
+from . import audit, claude_runner, config, health, knowledge, models, net, plan, toolrunner
 from .notify import notify_finding
 from .privesc import attempt_privesc
 from .prompts import (CONSOLIDATE_SCHEMA, CONSOLIDATE_SYSTEM, HUNT_SCHEMA, HUNT_SYSTEM,
@@ -295,13 +295,44 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
     def _halt_watch():
         while not halted.wait(1.0):
             if state.should_halt():
-                n = claude_runner.kill_all()
+                toolrunner.HOLD.set()
+                n = claude_runner.kill_all() + toolrunner.kill_tools()
                 log.record("halt", actor=operator(), killed=n)
                 state.activity(None, f"HALT — {n} tarefa(s) em voo encerrada(s); "
                                f"evidências e estado preservados", kind="system")
                 halted.set()
                 return
     threading.Thread(target=_halt_watch, daemon=True).start()
+
+    # Target-health circuit breaker: if the target stops answering, pause, kill
+    # everything in flight (agent sessions AND recon tools) and tell the human.
+    # Never auto-resumes — the operator decides when to hit the target again.
+    def _on_trip(reason):
+        toolrunner.HOLD.set()
+        state.pause_path.write_text(f"disjuntor: alvo sem resposta ({reason})\n")
+        n = claude_runner.kill_all() + toolrunner.kill_tools()
+        log.record("target_unhealthy", reason=reason, killed=n, url=probe_url)
+        msg = (f"DISJUNTOR: o alvo parou de responder ({reason}). Caçada PAUSADA e {n} processo(s) "
+               f"encerrado(s) para não sobrecarregar o alvo. Retome manualmente quando ele voltar.")
+        state.activity(None, msg, kind="system")
+        out.warn(msg)
+        notify.notify_event("unhealthy", target, reason)
+
+    def _on_recover(detail):
+        log.record("target_recovered", detail=detail, url=probe_url)
+        state.activity(None, f"alvo voltou a responder ({detail}); caçada continua PAUSADA até o operador retomar",
+                       kind="system")
+        notify.notify_event("recovered", target, detail)
+
+    probe_url = target if target.startswith(("http://", "https://")) else f"https://{target}"
+    watchdog = None
+    if config.HEALTH_CHECK:
+        watchdog = health.TargetHealth(probe_url, _on_trip, _on_recover)
+        watchdog.start()
+        log.record("health_start", url=probe_url, interval=config.HEALTH_INTERVAL, fails=config.HEALTH_FAILS,
+                   recon_rate=config.RECON_RATE, recon_threads=config.RECON_THREADS)
+        out.info(f"disjuntor ativo: {probe_url} a cada {config.HEALTH_INTERVAL}s · "
+                 f"recon limitado a {config.RECON_RATE} req/s, {config.RECON_THREADS} conexões")
 
     # Telegram remote control: approve/deny the gate and /halt from the phone.
     approvals = ApprovalStore(state.approvals_path)
@@ -376,6 +407,11 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
                 while queue or running:
                     stop = state.should_stop()
                     paused = state.is_paused()
+                    if not paused and toolrunner.HOLD.is_set() and not state.should_halt():
+                        toolrunner.HOLD.clear()          # operador retomou depois do disjuntor
+                        if watchdog:
+                            watchdog.reset()
+                        log.record("resume_after_breaker", actor=operator())
                     state.write_meta(status="paused" if paused else "running")
                     while queue and len(running) < workers and not stop and not paused:
                         item = queue.pop(0)
@@ -425,6 +461,8 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
         out.warn("interrupted")
     finally:
         halted.set()
+        if watchdog:
+            watchdog.stop()
         bot.stop()
         if proxy:
             claude_runner.PROXY_URL = None

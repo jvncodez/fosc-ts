@@ -42,6 +42,20 @@ CONTENT_MAX_BASES = 6               # cap how many base URLs we brute-force
 CONTENT_MAX_RESULTS = 1500          # cap discovered URLs fed to the surface
 CONTENT_STATUS = "200,204,301,302,307,401,403,405"
 
+# --- Proteção do alvo (não derrubar o que estamos testando) ---------------
+# Teto de requisições/s e de concorrência para TODA ferramenta de recon que
+# toca o alvo (httpx, katana, feroxbuster/ffuf, nuclei). Os padrões das
+# ferramentas (nuclei 150 req/s, ferox/ffuf 40 threads) derrubam servidor
+# pequeno. Ajustável por env para alvos robustos.
+RECON_RATE = int(os.environ.get("SENTINELA_RECON_RATE", "10"))       # req/s por ferramenta
+RECON_THREADS = int(os.environ.get("SENTINELA_RECON_THREADS", "5"))  # conexões simultâneas
+# Disjuntor: sonda o alvo periodicamente; N falhas seguidas (timeout, erro de
+# conexão ou 502/503/504) pausam a caçada e encerram o que está em voo.
+HEALTH_CHECK = os.environ.get("SENTINELA_HEALTH", "1").lower() not in ("0", "false", "no")
+HEALTH_INTERVAL = int(os.environ.get("SENTINELA_HEALTH_INTERVAL", "20"))  # s entre sondas
+HEALTH_FAILS = int(os.environ.get("SENTINELA_HEALTH_FAILS", "3"))        # falhas seguidas p/ desarmar
+HEALTH_TIMEOUT = int(os.environ.get("SENTINELA_HEALTH_TIMEOUT", "10"))   # s por sonda
+
 # DNS subdomain brute-force (domain targets only; skipped for IP/URL/localhost).
 # dnsx resolves a wordlist of candidate subdomains against the target apex.
 DNS_BRUTE = True

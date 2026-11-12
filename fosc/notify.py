@@ -108,10 +108,12 @@ def notify_event(kind: str, target: str, detail: str = "") -> tuple[bool, str | 
     """Campaign lifecycle: started / finished / denied / halted / sleeping."""
     e = html.escape
     icon = {"started": "🚀", "finished": "🏁", "denied": "⛔", "halted": "🛑",
-            "sleeping": "💤", "offline": "📡"}.get(kind, "ℹ️")
+            "sleeping": "💤", "offline": "📡", "unhealthy": "🩺", "recovered": "✅"}.get(kind, "ℹ️")
     head = {"started": "campanha iniciada", "finished": "campanha concluída",
             "denied": "teste ativo não autorizado", "halted": "PARADA DE EMERGÊNCIA",
-            "sleeping": "fila vazia — dormindo", "offline": "sem conexão"}.get(kind, kind)
+            "sleeping": "fila vazia — dormindo", "offline": "sem conexão",
+            "unhealthy": "DISJUNTOR: alvo sem resposta — caçada pausada",
+            "recovered": "alvo voltou a responder (caçada segue pausada)"}.get(kind, kind)
     text = f"{icon} <b>{e(head)}</b>\nalvo: <code>{e(target)}</code>"
     if detail:
         text += f"\n{e(detail)}"

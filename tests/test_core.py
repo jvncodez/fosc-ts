@@ -842,3 +842,78 @@ class NormalizeTargetTests(unittest.TestCase):
         self.assertEqual(config.normalize_target("https://x.com/app/#/a"), "https://x.com/app/")
         self.assertEqual(config.normalize_target("x.com"), "x.com")
         self.assertEqual(config.normalize_target("HTTPS://x.com/"), "https://x.com")
+
+
+class CircuitBreakerTests(unittest.TestCase):
+    """Don't take down the target: N failures trip, recovery never auto-resumes."""
+
+    def test_trips_after_consecutive_failures_only(self):
+        from fosc.health import Breaker
+        b = Breaker(fails=3)
+        self.assertEqual([b.feed(x) for x in (False, False, True, False, False)], [None] * 5)
+        self.assertEqual(b.feed(False), "trip")          # 3rd in a row
+        self.assertIsNone(b.feed(False))                 # trips once
+        self.assertEqual([b.feed(True), b.feed(True)], [None, "recover"])
+        self.assertTrue(b.tripped)                        # recovered but still tripped (human resumes)
+        b.reset()
+        self.assertFalse(b.tripped)
+
+    def test_watchdog_calls_trip_and_recover(self):
+        import time as _t
+        from fosc.health import TargetHealth
+        seq = iter([False, False, False, True, True] + [True] * 50)
+        ev = []
+        w = TargetHealth("https://x", lambda r: ev.append(("trip", r)), lambda d: ev.append(("rec", d)),
+                         interval=0.01, fails=3, prober=lambda u, t: (next(seq), "p"))
+        w.start(); _t.sleep(0.3); w.stop()
+        self.assertEqual([e[0] for e in ev], ["trip", "rec"])
+
+    def test_probe_treats_5xx_gateway_as_down_and_404_as_up(self):
+        import http.server, threading
+        from fosc.health import probe
+        codes = {"/up": 404, "/down": 503}
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(codes[self.path]); self.end_headers()
+            def log_message(self, *a): pass
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{srv.server_port}"
+        import os
+        os.environ["NO_PROXY"] = os.environ["no_proxy"] = "127.0.0.1"
+        try:
+            self.assertTrue(probe(base + "/up", 3)[0])
+            self.assertFalse(probe(base + "/down", 3)[0])
+            self.assertFalse(probe("http://127.0.0.1:1/", 2)[0])   # refused
+        finally:
+            srv.shutdown()
+
+
+class ToolKillAndRateTests(unittest.TestCase):
+    def test_kill_tools_stops_running_recon_tool(self):
+        import threading, time as _t
+        from fosc import toolrunner
+        res = {}
+        th = threading.Thread(target=lambda: res.setdefault("r", toolrunner.run_proc(["sleep", "30"], timeout=60)))
+        t0 = _t.time(); th.start(); _t.sleep(0.4)
+        self.assertGreaterEqual(toolrunner.kill_tools(), 1)
+        th.join(5)
+        self.assertLess(_t.time() - t0, 5)
+
+    def test_hold_blocks_new_tools(self):
+        from fosc import toolrunner
+        toolrunner.HOLD.set()
+        try:
+            self.assertEqual(toolrunner.run_proc(["echo", "x"], timeout=5), (None, "", ""))
+        finally:
+            toolrunner.HOLD.clear()
+
+    def test_every_target_touching_tool_is_rate_limited(self):
+        import pathlib
+        src = pathlib.Path("fosc/recon.py").read_text()
+        for tool, flag in (("httpx", '"-rl"'), ("katana", '"-rl"'), ("feroxbuster", '"--rate-limit"'),
+                           ("ffuf", '"-rate"'), ("nuclei", '"-rl"')):
+            i = src.index(f'["{tool}",')
+            self.assertIn(flag, src[i:i + 400], tool)
+        self.assertNotIn('"-t", "40"', src)
