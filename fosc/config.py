@@ -19,8 +19,8 @@ CONFIG_PATH = FOSC_HOME / "config.json"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FOSC_BIN = REPO_ROOT / "bin" / "fosc"
 
-DEFAULT_WORKERS = 2
-DEFAULT_TASK_TIMEOUT = 1200         # seconds per headless claude hunt task (deep, persistent)
+DEFAULT_WORKERS = int(os.environ.get("SENTINELA_WORKERS", "6"))  # paralelismo de caça; proteção é por-host (não martela o alvo)
+DEFAULT_TASK_TIMEOUT = int(os.environ.get("SENTINELA_TASK_TIMEOUT", "600"))  # s por tarefa; item mais lento observado ~110s
 DEFAULT_VERIFY_TIMEOUT = 480        # seconds for the adversarial Opus review
 DEFAULT_CONTINUOUS_INTERVAL = 1800  # seconds between recon refresh passes
 DEFAULT_RECON_TIMEOUT = 180         # seconds per external recon tool call
