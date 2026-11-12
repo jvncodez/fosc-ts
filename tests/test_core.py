@@ -352,6 +352,7 @@ class SpaReconTests(unittest.TestCase):
         self.assertEqual(_normalize_js_path("/rest/products/:id/reviews"), "/rest/products/1/reviews")
         self.assertEqual(_normalize_js_path("/rest/${id}/x"), "/rest/1/x")   # resolved to testable
         self.assertIsNone(_normalize_js_path("/rest/${broken/x"))            # malformed -> dropped
+        self.assertIsNone(_normalize_js_path("//api.ipinfodb.com/v3/ip"))    # external (scope hygiene)
 
 
 class MitreTests(unittest.TestCase):

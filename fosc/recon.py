@@ -182,6 +182,8 @@ _DYN_SEG = re.compile(r"(:[A-Za-z_][A-Za-z0-9_]*|\$\{[^}]*\}|\{\{[^}]*\}\}|<[^>]
 
 def _normalize_js_path(p: str) -> str | None:
     """Turn a route literal into a concrete, testable path, or None to drop it."""
+    if p.startswith("//"):
+        return None  # protocol-relative URL (//host/..) = EXTERNAL host, not a path
     p = p.split("?")[0].split("#")[0]
     if "//" in p[1:] or " " in p or p.endswith("/") and p != "/":
         p = p.rstrip("/") or "/"
