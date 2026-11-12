@@ -1,0 +1,90 @@
+/* ============================================================================
+   FOSC/TS — estilos base (scaffold MÍNIMO; as designers evoluem a partir daqui).
+   Usa SEMPRE as variáveis de tokens.css — não cole cor fixa aqui.
+   ============================================================================ */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--surface-2);
+  line-height: 1.5;
+}
+a { color: var(--bb-azul-escuro); }
+
+/* ---- Topo / marca ---- */
+.topbar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 24px;
+  background: var(--bb-branco);
+  border-bottom: 3px solid var(--bb-amarelo);
+}
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand .logo { height: 34px; }
+.brand .name { font-weight: 800; font-size: 20px; color: var(--bb-azul-escuro); letter-spacing: .3px; }
+.brand .tag  { font-size: 12px; color: var(--text-muted); }
+.topbar .spacer { flex: 1; }
+.badge-scope {
+  font-size: 12px; font-weight: 700; color: var(--bb-azul-escuro);
+  background: var(--bb-amarelo); padding: 6px 12px; border-radius: 999px;
+}
+
+/* ---- Abas ---- */
+.tabs { display: flex; gap: 4px; padding: 0 24px; background: var(--bb-branco); border-bottom: 1px solid var(--border); }
+.tab {
+  border: 0; background: none; cursor: pointer;
+  padding: 12px 16px; font: inherit; font-weight: 600; color: var(--text-muted);
+  border-bottom: 3px solid transparent;
+}
+.tab:hover { color: var(--bb-azul-escuro); }
+.tab.active { color: var(--bb-azul-escuro); border-bottom-color: var(--bb-azul); }
+
+/* ---- Layout ---- */
+main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* ---- KPIs ---- */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--gap); margin-bottom: var(--gap); }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); }
+.kpi .v { font-size: 28px; font-weight: 800; color: var(--bb-azul-escuro); }
+.kpi .l { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+
+/* ---- Cartões ---- */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow); margin-bottom: var(--gap); }
+.card h2 { margin: 0 0 12px; font-size: 16px; color: var(--bb-azul-escuro); }
+
+/* ---- Tabela de achados ---- */
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); }
+code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); padding: 2px 6px; border-radius: 6px; }
+
+/* ---- Selos de severidade ---- */
+.sev { display: inline-block; font-size: 11px; font-weight: 800; color: #fff; padding: 3px 10px; border-radius: 999px; text-transform: uppercase; }
+.sev.critical { background: var(--sev-critical); }
+.sev.high     { background: var(--sev-high); }
+.sev.medium   { background: var(--sev-medium); color: var(--text); }
+.sev.low      { background: var(--sev-low); }
+.sev.info     { background: var(--sev-info); }
+
+/* ---- Trilha de auditoria ---- */
+.chain-ok  { color: var(--ok); font-weight: 700; }
+.audit-row { display: grid; grid-template-columns: 90px 140px 1fr; gap: 10px; padding: 8px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
+.audit-row .k { font-weight: 700; color: var(--bb-azul-escuro); }
+.audit-row time { color: var(--text-muted); font-family: var(--mono); }
+
+/* ---- Aprovações (human-in-the-loop) ---- */
+.approval { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 10px; background: var(--surface-2); }
+.approval .ctx { flex: 1; }
+.btn { border: 0; cursor: pointer; font: inherit; font-weight: 700; padding: 8px 16px; border-radius: 999px; }
+.btn.approve { background: var(--ok); color: #fff; }
+.btn.deny    { background: var(--sev-critical); color: #fff; }
+
+/* ---- Rodapé / aviso scaffold ---- */
+.scaffold-note { margin: 24px; padding: 12px 16px; border-left: 4px solid var(--bb-amarelo); background: #FFFBEA; border-radius: var(--radius-sm); font-size: 13px; color: var(--text); }
+
+@media (max-width: 640px) {
+  .audit-row { grid-template-columns: 1fr; }
+  main { padding: 16px; }
+}

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FOSC/TS — Console</title>
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <!-- ===== Topo / marca ===== -->
+  <header class="topbar">
+    <div class="brand">
+      <img class="logo" src="assets/logo.svg" alt="FOSC/TS">
+      <span class="name">FOSC/TS</span>
+      <span class="tag">Ferramenta Ofensiva de Segurança Cibernética para Tecnologia e Serviços</span>
+    </div>
+    <span class="spacer"></span>
+    <span id="scope" class="badge-scope">escopo: —</span>
+  </header>
+
+  <!-- ===== Abas (os 8 pontos do desafio viram telas) ===== -->
+  <nav class="tabs">
+    <button class="tab active" data-panel="p-console">Console da campanha</button>
+    <button class="tab" data-panel="p-achados">Achados</button>
+    <button class="tab" data-panel="p-aprovacoes">Aprovações</button>
+    <button class="tab" data-panel="p-trilha">Trilha de auditoria</button>
+  </nav>
+
+  <main>
+    <!-- Console -->
+    <section id="p-console" class="panel active">
+      <div id="kpis" class="kpis"></div>
+      <div class="card">
+        <h2>Campanha</h2>
+        <p>Alvo autorizado e controle da campanha (iniciar, pausar, parar, interrupção
+           de emergência). <em>Área para as designers desenharem os controles.</em></p>
+      </div>
+    </section>
+
+    <!-- Achados -->
+    <section id="p-achados" class="panel">
+      <div class="card">
+        <h2>Achados confirmados</h2>
+        <table>
+          <thead><tr><th>Severidade</th><th>Classe</th><th>Endpoint</th><th>CVSS</th><th>Confiança</th><th>MITRE ATT&CK</th></tr></thead>
+          <tbody id="findings-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Aprovações -->
+    <section id="p-aprovacoes" class="panel">
+      <div class="card">
+        <h2>Aprovação humana (human-in-the-loop)</h2>
+        <div id="approvals-list"></div>
+      </div>
+    </section>
+
+    <!-- Trilha -->
+    <section id="p-trilha" class="panel">
+      <div class="card">
+        <h2>Trilha de auditoria <span id="chain-status" style="float:right;font-size:13px"></span></h2>
+        <div id="audit-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <p class="scaffold-note">
+    <strong>Scaffold mínimo.</strong> Paleta e marca em <code>css/tokens.css</code>;
+    dados de exemplo em <code>js/data.js</code>. O CLI do agente continua funcionando
+    à parte. Guia de evolução em <code>web/README.md</code>.
+  </p>
+
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

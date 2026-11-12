@@ -155,7 +155,7 @@ class Out:
                   Text("hunt", style="grey50"), Text(hunt_ladder, style="grey62"))
         g.add_row(Text("state", style="grey50"), Text(str(run_dir), style="grey62"), Text(""), Text(""))
         with self._region():
-            self.c.print(Panel(g, title=f"[bold {ACCENT}]BB-Sentinela[/]", border_style=ACCENT, expand=False))
+            self.c.print(Panel(g, title=f"[bold {ACCENT}]FOSC/TS[/]", border_style=ACCENT, expand=False))
 
     def info(self, msg):
         if not self.rich:

@@ -1,20 +1,20 @@
-"""Startup banner: red-gradient BB-SENTINELA wordmark + governance tagline + status."""
+"""Startup banner: FOSC/TS wordmark (paleta BB amarelo→azul) + tagline + status."""
 import sys
 
 from . import config
 
-# "SENTINELA", ANSI Shadow font.
+# "FOSC", ANSI Shadow font. O "/TS" vem como acento abaixo.
 LOGO = [
-    "███████╗███████╗███╗   ██╗████████╗██╗███╗   ██╗███████╗██╗      █████╗ ",
-    "██╔════╝██╔════╝████╗  ██║╚══██╔══╝██║████╗  ██║██╔════╝██║     ██╔══██╗",
-    "███████╗█████╗  ██╔██╗ ██║   ██║   ██║██╔██╗ ██║█████╗  ██║     ███████║",
-    "╚════██║██╔══╝  ██║╚██╗██║   ██║   ██║██║╚██╗██║██╔══╝  ██║     ██╔══██║",
-    "███████║███████╗██║ ╚████║   ██║   ██║██║ ╚████║███████╗███████╗██║  ██║",
-    "╚══════╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝╚═╝  ╚═╝",
+    "███████╗ ██████╗ ███████╗ ██████╗",
+    "██╔════╝██╔═══██╗██╔════╝██╔════╝",
+    "█████╗  ██║   ██║███████╗██║     ",
+    "██╔══╝  ██║   ██║╚════██║██║     ",
+    "██║     ╚██████╔╝███████║╚██████╗",
+    "╚═╝      ╚═════╝ ╚══════╝ ╚═════╝",
 ]
-# bright red at the top fading to deep crimson, interpolated over all rows
-_TOP = (255, 92, 92)
-_BOTTOM = (150, 6, 26)
+# Paleta Banco do Brasil: amarelo no topo -> azul claro embaixo.
+_TOP = (250, 225, 0)      # amarelo BB
+_BOTTOM = (46, 139, 218)  # azul claro BB
 RESET = "\033[0m"
 DIM = "\033[38;2;120;120;128m"
 
@@ -24,7 +24,7 @@ def _rgb(r, g, b):
 
 
 def _grad(i: int, n: int):
-    """Interpolate TOP->BOTTOM at row i of n."""
+    """Interpola TOP->BOTTOM na linha i de n."""
     t = i / max(n - 1, 1)
     return tuple(round(a + (b - a) * t) for a, b in zip(_TOP, _BOTTOM))
 
@@ -42,14 +42,13 @@ def _status_line() -> str:
 
 def print_banner():
     if not sys.stdout.isatty():
-        return  # keep piped output and hunt.log clean
+        return  # mantém o output piped e o hunt.log limpos
     print()
     n = len(LOGO)
     for i, line in enumerate(LOGO):
         print("  " + _rgb(*_grad(i, n)) + line + RESET)
-    print()
-    print(f"  {_rgb(255, 64, 64)}BB-SENTINELA{RESET} {DIM}·{RESET} "
-          f"{_rgb(214, 24, 40)}agente autônomo de pentest com governança{RESET}")
+    print(f"  {_rgb(46, 139, 218)}/ TS{RESET}  {_rgb(10, 61, 122)}Ferramenta Ofensiva de "
+          f"Segurança Cibernética para Tecnologia e Serviços{RESET}")
     print(f"  {DIM}escopo estrito · human-in-the-loop · trilha auditável · MITRE ATT&CK"
           f"  ·  v{config.VERSION}{RESET}")
     status = _status_line()

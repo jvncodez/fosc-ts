@@ -191,7 +191,7 @@ def build_parser() -> argparse.ArgumentParser:
     action.add_argument("-h", "--hunt", dest="action", action="store_const", const="hunt",
                          help="hunter mode: recon -> rank -> hunt -> validate -> PoC, loops over the surface")
     action.add_argument("-c", "--chat", dest="action", action="store_const", const="chat",
-                         help="conversar com o BB-Sentinela (assistente de pentest); -a opcional dá contexto do alvo")
+                         help="conversar com o FOSC/TS (assistente de pentest); -a opcional dá contexto do alvo")
     action.add_argument("-w", "--watch", dest="action", action="store_const", const="watch",
                          help="live terminal dashboard for a running (or finished) hunt")
     action.add_argument("-v", "--view", dest="action", action="store_const", const="view",
