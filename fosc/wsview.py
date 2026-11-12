@@ -206,11 +206,17 @@ def _audit(audit: list[dict]) -> list[dict]:
 
 # --------- API pública -----------------------------------------------------
 
+_LIVE = ("running", "recon", "sleeping", "paused")
+
+
 def _pick(target: str | None) -> RunState | None:
     if target and config.run_exists(target):
         return RunState(target)
     runs = list_runs()
-    return runs[0] if runs else None
+    if not runs:
+        return None
+    # campanha "atual": a viva; senão a de início mais recente.
+    return max(runs, key=lambda st: (st.status() in _LIVE, st.read_meta().get("started_at") or 0))
 
 
 def workspace(target: str | None = None) -> dict:
