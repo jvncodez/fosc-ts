@@ -137,6 +137,16 @@ const mockApi = {
     pushEvent('approval', 'Aprovação solicitada', `${plan.action} enviada à fila humana.`);
     return cloneState();
   },
+  async getCampaigns() {
+    await pause();
+    const c = state.campaign;
+    return { campaigns: [{ target: c.target, status: c.status, rawStatus: c.status, live: c.status === 'running',
+      confirmed: state.findings.filter(f => f.classification === 'confirmed').length, severity: {},
+      cost: 0, scopeId: c.scopeId, startedAt: c.startedAt || '—' }],
+      totals: { count: 1, live: c.status === 'running' ? 1 : 0, confirmed: 0, cost: 0 } };
+  },
+  async selectCampaign() { await pause(); return cloneState(); },
+  async getFinding(id) { await pause(); const f = state.findings.find(x => x.id === id) || {}; return { ok: true, finding: f, report: '' }; },
 };
 
 // REST e SSE genéricos; nenhum endpoint é definido antes do contrato do backend.
@@ -206,12 +216,15 @@ const liveApi = {
     live.confirmedIds = null;
     return this.getWorkspace();
   },
-  async startCampaign({ target, authorized }) {
+  async startCampaign({ target, authorized, workers, scope }) {
     if (!authorized) throw new Error('Confirme a autorização antes de iniciar.');
+    const body = { target: String(target || '').trim() };
+    if (workers) body.workers = Math.max(1, Math.min(10, Number(workers) || 6));
+    if (scope) body.scope = String(scope).slice(0, 500);
     try {
-      const r = await jpost('/api/hunt', { target: String(target || '').trim() });
+      const r = await jpost('/api/hunt', body);
       if (r.error) throw new Error(r.error);
-      live.target = String(target || '').trim().replace(/^https?:\/\//, ''); live.confirmedIds = null;
+      live.target = r.target || body.target; live.confirmedIds = null;  // alvo normalizado pelo backend
       return this.getWorkspace();
     } catch (e) { if (/^HTTP /.test(e.message)) return mockApi.startCampaign({ target, authorized }); throw e; }
   },
@@ -225,6 +238,17 @@ const liveApi = {
     return this.getWorkspace();
   },
   async requestApproval() { return this.getWorkspace(); }, // no live, os pedidos nascem do agente
+  async getCampaigns() {
+    try { return await jget('/api/campaigns'); } catch { return { campaigns: [], totals: {} }; }
+  },
+  async selectCampaign(target) {
+    live.target = String(target || '').trim(); live.confirmedIds = null;
+    return this.getWorkspace();
+  },
+  async getFinding(id) {
+    try { return await jget(`/api/finding?target=${encodeURIComponent(live.target || '')}&id=${encodeURIComponent(id)}`); }
+    catch (e) { return { ok: false, error: e.message }; }
+  },
 };
 
 export const api = DATA_MODE === 'live' ? liveApi : mockApi;

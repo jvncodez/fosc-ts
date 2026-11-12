@@ -276,6 +276,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if u.path == "/api/workspace":
             from . import wsview
             return self._json(wsview.workspace(q.get("target")))
+        if u.path == "/api/campaigns":
+            from . import wsview
+            return self._json(wsview.campaigns())
         if u.path == "/api/state":
             if not q.get("target"):
                 return self._json({"error": "target obrigatório"}, 400)

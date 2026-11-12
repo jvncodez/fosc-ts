@@ -17,7 +17,7 @@ from . import config, jobqueue
 def _argv_for(job: dict) -> list[str]:
     p = job.get("opts") or {}
     argv = [str(config.FOSC_BIN), "-h", "-a", job["target"],
-            "--workers", str(max(1, min(8, int(p.get("workers") or config.DEFAULT_WORKERS)))),
+            "--workers", str(max(1, min(12, int(p.get("workers") or config.DEFAULT_WORKERS)))),
             "--timeout", str(max(60, int(p.get("timeout") or config.DEFAULT_TASK_TIMEOUT)))]
     if p.get("max_items"):
         argv += ["--max-items", str(max(1, int(p["max_items"])))]

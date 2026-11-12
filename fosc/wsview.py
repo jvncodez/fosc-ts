@@ -21,7 +21,14 @@ _CONF_NUM = {"high": 0.92, "medium": 0.68, "low": 0.4, "alta": 0.92, "media": 0.
 # status da engine -> status do front (draft/running/completed/interrupted)
 _STATUS = {"running": "running", "recon": "running", "sleeping": "running", "paused": "running",
            "finished": "completed", "done": "completed", "stopped": "interrupted",
-           "halted": "interrupted", "error": "interrupted", "idle": "draft", "none": "draft"}
+           "halted": "interrupted", "error": "interrupted", "denied": "interrupted",
+           "refused": "interrupted", "crashed": "interrupted", "idle": "draft", "none": "draft"}
+
+
+def _map_status(raw: str) -> str:
+    # Fail-safe: um status desconhecido NUNCA vira "running" (não alega campanha
+    # viva sem estar). Qualquer estado vivo real já está mapeado explicitamente.
+    return _STATUS.get(raw, "interrupted")
 
 
 def _fmt(ts) -> str:
@@ -74,7 +81,7 @@ def _campaign(st: RunState | None, snap: dict) -> dict:
     done = snap.get("done") or 0
     progress = int(done / total * 100) if total else (100 if snap["status"] in ("finished", "done") else 0)
     return {"id": st.target, "name": f"Campanha — {st.target}", "target": st.target,
-            "status": _STATUS.get(snap["status"], "running"), "progress": progress,
+            "status": _map_status(snap["status"]), "progress": progress,
             "startedAt": _fmt(m.get("started_at")), "owner": operator(),
             "scopeId": _scope_id(st.target),
             "cost": round(m.get("cost_usd") or 0, 2), "confirmed": snap.get("confirmed_count") or 0}
@@ -223,6 +230,16 @@ _AUDIT_TITLE = {"run_start": "Campanha configurada", "run_end": "Campanha conclu
                 "proxy_start": "Proxy de escopo ativo"}
 
 
+def _activity(snap: dict) -> list[dict]:
+    """Feed AO VIVO do agente (snapshot.activity) — o 'terminal' em tempo real:
+    recon, autorizações, vereditos, achados. Mesma ideia do painel antigo."""
+    out = []
+    for a in snap.get("activity") or []:
+        out.append({"time": _fmt(a.get("ts")), "kind": a.get("kind") or "system",
+                    "msg": str(a.get("msg") or "")})
+    return out[-200:]
+
+
 def _audit(audit: list[dict]) -> list[dict]:
     out = []
     for ev in reversed(audit[-80:]):
@@ -241,21 +258,53 @@ _LIVE = ("running", "recon", "sleeping", "paused")
 
 
 def _pick(target: str | None) -> RunState | None:
-    if target and config.run_exists(target):
-        return RunState(target)
+    t = (target or "").strip()
+    if t:
+        # Alvo explícito: mostra ESSE run se existir; senão None (campanha na
+        # fila/preparando) — nunca cai numa campanha diferente.
+        return RunState(t) if config.run_exists(t) else None
     runs = list_runs()
     if not runs:
         return None
-    # campanha "atual": a viva; senão a de início mais recente.
+    # Sem alvo pedido: a campanha "atual" = a viva; senão a de início mais recente.
     return max(runs, key=lambda st: (st.status() in _LIVE, st.read_meta().get("started_at") or 0))
+
+
+def _queue_position(target: str) -> int | None:
+    if not (config.QUEUE_ENABLED and target):
+        return None
+    try:
+        from . import jobqueue
+        for j in jobqueue.get_queue().snapshot():
+            if j.get("target") == target:
+                return j.get("position") or 0  # 0 = já em execução/lançando
+    except Exception:
+        return None
+    return None
+
+
+def _draft_workspace(target: str) -> dict:
+    """Campanha pedida mas ainda sem run (recém-iniciada/enfileirada): mostra ESSE
+    alvo como 'na fila/preparando', não outra campanha."""
+    camp = _campaign(None, {})
+    if target:
+        camp = {"id": target, "name": f"Campanha — {target}", "target": target, "status": "draft",
+                "progress": 0, "startedAt": None, "owner": operator(), "scopeId": _scope_id(target),
+                "cost": 0, "confirmed": 0}
+        pos = _queue_position(target)
+        if pos is not None:
+            camp["status"] = "running"   # comprometida: na fila/lançando
+            camp["queued"] = True
+            camp["queuePosition"] = pos
+    return {"campaign": camp, "policies": _policies(), "plan": [], "commands": [],
+            "approvals": [], "findings": [], "audit": [], "activity": []}
 
 
 def workspace(target: str | None = None) -> dict:
     st = _pick(target)
     if not st:
-        return {"campaign": _campaign(None, {}), "policies": _policies(), "plan": [],
-                "commands": [], "approvals": [], "findings": [], "audit": []}
-    snap = st.snapshot(results=200, activity=0)
+        return _draft_workspace((target or "").strip())
+    snap = st.snapshot(results=200, activity=200)
     audit = _read_jsonl(st.audit_path)
     return {
         "campaign": _campaign(st, snap),
@@ -265,7 +314,31 @@ def workspace(target: str | None = None) -> dict:
         "approvals": _approvals(st),
         "findings": _findings(st, snap),
         "audit": _audit(audit),
+        "activity": _activity(snap),
     }
+
+
+def campaigns() -> dict:
+    """Todas as campanhas do motor, no shape do front da Ana — para a página
+    'Campanhas' (frota). Vivas primeiro, depois as de início mais recente."""
+    out = []
+    for st in list_runs():
+        snap = st.snapshot(results=0, activity=0)
+        m = snap["meta"]
+        raw = snap["status"]
+        out.append({
+            "target": st.target, "status": _map_status(raw), "rawStatus": raw,
+            "live": raw in _LIVE, "confirmed": snap["confirmed_count"], "severity": snap["severity"],
+            "cost": round(m.get("cost_usd") or 0, 2), "scopeId": _scope_id(st.target),
+            "startedAt": _fmt(m.get("started_at")), "_sort": m.get("started_at") or 0,
+        })
+    out.sort(key=lambda c: (not c["live"], -c["_sort"]))
+    for c in out:
+        c.pop("_sort", None)
+    totals = {"count": len(out), "live": sum(1 for c in out if c["live"]),
+              "confirmed": sum(c["confirmed"] for c in out),
+              "cost": round(sum(c["cost"] for c in out), 2)}
+    return {"campaigns": out, "totals": totals}
 
 
 def resolve_approval(target: str, rid: str, decision: str) -> dict:

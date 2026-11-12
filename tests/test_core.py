@@ -1286,7 +1286,7 @@ class WsViewTests(unittest.TestCase):
         from fosc import wsview
         ws = wsview.workspace(None)
         self.assertEqual(set(ws), {"campaign", "policies", "plan", "commands",
-                                   "approvals", "findings", "audit"})
+                                   "approvals", "findings", "audit", "activity"})
         self.assertEqual(ws["campaign"]["status"], "draft")
         self.assertEqual(ws["findings"], [])
         # as 3 listas de política sempre existem (allowed/conditional/prohibited)
@@ -1299,7 +1299,7 @@ class WsViewTests(unittest.TestCase):
         from fosc import wsview
         t = "alvo.example.com"
         st = RunState(t)
-        st.write_meta(target=t, status="running", started_at=1700000000.0)
+        st.write_meta(target=t, status="running", started_at=1700000000.0, pid=os.getpid())
         st.add_confirmed({"url": f"https://{t}/login", "vuln_class": "SQLi",
                           "severity": "high", "title": "SQLi no login", "summary": "resumo",
                           "impact": "impacto", "evidence_marker": "admin@x", "confidence": "high"})
@@ -1315,6 +1315,28 @@ class WsViewTests(unittest.TestCase):
         pend = [a for a in ws["approvals"] if a["status"] == "pending"]
         self.assertEqual(len(pend), 1)
         self.assertEqual(pend[0]["title"], "iniciar teste ativo")
+
+    def test_campaigns_fleet_shape(self):
+        isolate(self)
+        from fosc.state import RunState
+        from fosc import wsview
+        viva = RunState("viva.example.com")
+        viva.write_meta(target="viva.example.com", status="running", started_at=1700000100.0, pid=os.getpid())
+        viva.add_confirmed({"url": "https://viva.example.com/x", "vuln_class": "XSS",
+                            "severity": "medium", "title": "XSS", "summary": "s", "confidence": "medium"})
+        morta = RunState("morta.example.com")
+        morta.write_meta(target="morta.example.com", status="finished", started_at=1700000000.0)
+        data = wsview.campaigns()
+        self.assertEqual(data["totals"]["count"], 2)
+        self.assertEqual(data["totals"]["live"], 1)
+        self.assertEqual(data["totals"]["confirmed"], 1)
+        # viva primeiro (ao vivo antes das paradas)
+        self.assertEqual(data["campaigns"][0]["target"], "viva.example.com")
+        self.assertTrue(data["campaigns"][0]["live"])
+        self.assertEqual(data["campaigns"][0]["status"], "running")
+        morta_row = next(c for c in data["campaigns"] if c["target"] == "morta.example.com")
+        self.assertFalse(morta_row["live"])
+        self.assertEqual(morta_row["status"], "completed")
 
     def test_resolve_approval_unblocks_and_is_idempotent(self):
         isolate(self)
