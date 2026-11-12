@@ -58,6 +58,9 @@ RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 COPY fosc ./fosc
 COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
+# `fosc` no PATH para operar o container (fosc --audit / --approve / --halt / --status)
+RUN printf '#!/usr/bin/env bash\ncd /app && exec python3 -m fosc.cli "$@"\n' > /usr/local/bin/fosc \
+ && chmod +x /usr/local/bin/fosc
 
 # Defaults de governança para produção (sobrescrevíveis pela task definition).
 ENV SENTINELA_HOME=/data \

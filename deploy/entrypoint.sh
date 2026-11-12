@@ -8,11 +8,13 @@ set -euo pipefail
 : "${SENTINELA_HOME:=/data}"
 mkdir -p "$SENTINELA_HOME"                      # volume EFS persistente
 
-# Obrigatórios para o Bedrock e o escopo.
-: "${AWS_REGION:?AWS_REGION é obrigatório para o Bedrock}"
+# AWS_REGION só é obrigatório no modo Bedrock (dev/Anthropic usa ANTHROPIC_API_KEY).
+if [ "${SENTINELA_PROVIDER:-bedrock}" = "bedrock" ]; then
+  : "${AWS_REGION:?AWS_REGION é obrigatório para o Bedrock}"
+fi
 : "${TARGET:?TARGET (URL do escopo autorizado) é obrigatório}"
 
-echo "BB-Sentinela :: provider=${SENTINELA_PROVIDER:-bedrock} region=${AWS_REGION} home=${SENTINELA_HOME}"
+echo "BB-Sentinela :: provider=${SENTINELA_PROVIDER:-bedrock} region=${AWS_REGION:-n/a} home=${SENTINELA_HOME}"
 echo "BB-Sentinela :: scope-proxy=${SENTINELA_SCOPE_PROXY:-1} authz=${SENTINELA_AUTHZ:-ask}"
 echo "BB-Sentinela :: alvo autorizado = ${TARGET}"
 

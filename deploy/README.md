@@ -4,6 +4,16 @@ Execução **headless** do agente na AWS, com **estado persistente**, **segredos
 do repo** e **aprovação humana remota**. O modelo é o Amazon Bedrock; a governança
 (escopo estrito na rede, human-in-the-loop, trilha de auditoria) vai junto.
 
+## Instalação rápida via Docker (nada na máquina além da imagem)
+
+```bash
+bash install.sh      # builda a imagem com o arsenal completo + cria o volume de estado
+```
+
+Ao final, o script imprime os comandos `docker run` para rodar (dev/Anthropic ou
+produção/Bedrock) e para operar/auditar (`fosc --audit/--approve/--halt` via volume).
+O resto deste documento é o deploy em produção no AWS.
+
 ## Arquitetura
 
 ```
