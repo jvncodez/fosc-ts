@@ -23,9 +23,10 @@ def write_report(run_dir: Path, fid: str, target: str, item: dict, finding: dict
             except OSError:
                 pass
 
-    sev = (review.get("severity") or finding.get("severity") or "unrated").capitalize()
-    cvss = review.get("cvss") if review.get("cvss") is not None else finding.get("cvss")
-    cls = review.get("vuln_class") or finding.get("vuln_class") or "Vulnerability"
+    # finding já incorpora o review E a reclassificação do Conselho — prefira-o.
+    sev = (finding.get("severity") or review.get("severity") or "unrated").capitalize()
+    cvss = finding.get("cvss") if finding.get("cvss") is not None else review.get("cvss")
+    cls = finding.get("vuln_class") or review.get("vuln_class") or "Vulnerability"
     title = finding.get("title") or f"{cls} em {item.get('path') or item['url']}"
     steps = finding.get("steps") or []
     md = [

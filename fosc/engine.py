@@ -142,6 +142,7 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
                                "summary": f.get("summary"), "impact": f.get("impact"),
                                "steps": f.get("steps") or [], "repro_curl": f.get("repro_curl"),
                                "evidence_marker": f.get("evidence_marker"),
+                               "poc_path": f.get("poc_path"),
                                "shell_obtained": bool(f.get("shell_obtained")),
                                "shell_howto": f.get("shell_howto"),
                                "mitre": mitre.techniques(review.get("vuln_class") or cls),
@@ -190,7 +191,9 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
                                          cvss=finding.get("cvss"),
                                          mitre=[t.get("id") for t in finding.get("mitre") or []],
                                          evidence=finding.get("evidence_marker"))
-                    finding["report_path"] = write_report(state.dir, finding["id"], target, item, f,
+                    # passa `finding` (não `f`): carrega o parecer do Conselho e a
+                    # severidade/confiança já reclassificadas por ele.
+                    finding["report_path"] = write_report(state.dir, finding["id"], target, item, finding,
                                                           review, state.task_dir(item))
                     # rewrite the last line with the report path (small file, append-only otherwise)
                     _patch_last_confirmed(state, finding)
