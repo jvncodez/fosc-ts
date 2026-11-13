@@ -170,3 +170,28 @@ a:active,.row-link:active { color: var(--link-pressed); }
 .sidebar .emergency-callout .button{width:100%;margin-top:8px}
 /* nav um pouco mais enxuta pra caber os 9 itens */
 .sidebar .main-nav .nav-item{height:38px}
+
+/* ---- Terminal da caça: dashboard de KPIs + tarefas em andamento (como o painel antigo) ---- */
+.hunt-kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin:16px 0}
+@media(max-width:1100px){.hunt-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:640px){.hunt-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpi{padding:14px;border:1px solid var(--border-muted);border-radius:10px;background:var(--container-neutral-default);display:grid;gap:6px;align-content:start}
+.kpi.accent{border-color:var(--border-primary);background:var(--container-primary-tint)}
+.kpi-label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)}
+.kpi-value{font:800 24px/1 var(--font-titles,inherit);color:var(--text-default)}
+.kpi-value small{font-size:13px;font-weight:600;color:var(--text-muted);margin-left:3px}
+.kpi-sub{font-size:12px;color:var(--text-muted)}
+.kpi-bar{height:6px;border-radius:999px;background:var(--container-neutral-hover);overflow:hidden}
+.kpi-bar i{display:block;height:100%;border-radius:999px;background:var(--container-primary-default);transition:width .4s}
+.sevbar{display:flex;height:6px;border-radius:999px;overflow:hidden;gap:2px}
+.sevbar i{display:block;height:100%}
+/* tarefas em andamento */
+.hunt-inflight .inflight-body{padding:12px 14px;display:grid;gap:10px;max-height:240px;overflow:auto}
+.hunt-inflight .idle{font-size:13px;color:var(--text-muted);padding:6px 0}
+.task{position:relative;padding:11px 12px;border:1px solid var(--border-muted);border-radius:9px;background:var(--surface-default,var(--container-neutral-default));overflow:hidden}
+.task.reviewing{border-left:3px solid var(--status-warning)}
+.task:not(.reviewing){border-left:3px solid var(--status-success)}
+.task-url{font-family:var(--font-mono,ui-monospace,monospace);font-size:13px;color:var(--text-default);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.task-meta{display:flex;justify-content:space-between;gap:10px;margin-top:5px;font-size:12px;color:var(--text-muted)}
+.task-shimmer{position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--container-primary-tint),transparent);opacity:.5;transform:translateX(-100%);animation:taskshimmer 1.8s infinite}
+@keyframes taskshimmer{100%{transform:translateX(100%)}}

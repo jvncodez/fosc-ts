@@ -240,6 +240,39 @@ def _activity(snap: dict) -> list[dict]:
     return out[-200:]
 
 
+def _hunt(st: RunState, snap: dict) -> dict:
+    """Métricas ao vivo da caça — o dashboard do terminal antigo: KPIs
+    (testados/total, confirmados+severidade, custo, round, em voo, duração),
+    tarefas em andamento (inflight) e série p/ sparkline. Só lê o snapshot."""
+    m = snap.get("meta") or {}
+    status = _map_status(snap["status"])
+    live = status == "running"
+    total = snap.get("surface_total") or 0
+    done = snap.get("done") or 0
+    progress = int(done / total * 100) if total else (100 if snap["status"] in ("finished", "done") else 0)
+    cost = round(float(m.get("cost_usd") or 0), 4)
+    sev = snap.get("severity") or {}
+    severity = {"critical": sev.get("critical", 0), "high": sev.get("high", 0),
+                "medium": sev.get("medium", 0), "low": (sev.get("low", 0) + sev.get("info", 0))}
+    active = snap.get("active") or {}
+    rows = active.values() if isinstance(active, dict) else active
+    inflight = [{"url": t.get("url", ""), "phase": t.get("phase") or "hunting",
+                 "startedAt": t.get("started_at")} for t in rows]
+    spark = [{"ts": r.get("ts"), "verdict": r.get("verdict")}
+             for r in (snap.get("results") or []) if r.get("ts")]
+    return {
+        "status": status, "live": live,
+        "done": done, "total": total, "progress": progress,
+        "confirmed": snap.get("confirmed_count") or 0, "severity": severity,
+        "cost": cost, "costPerEndpoint": round(cost / done, 4) if done else None,
+        "round": m.get("round"), "roundDone": m.get("round_done"), "roundTotal": m.get("round_total"),
+        "workers": m.get("workers"), "activeCount": len(inflight), "inflight": inflight,
+        "startedAt": m.get("started_at"), "finishedAt": m.get("finished_at"),
+        "continuous": bool(m.get("continuous")), "scope": str(m.get("scope") or ""),
+        "verdicts": snap.get("verdicts") or {}, "spark": spark,
+    }
+
+
 def _audit(audit: list[dict]) -> list[dict]:
     out = []
     for ev in reversed(audit[-80:]):
@@ -315,6 +348,7 @@ def workspace(target: str | None = None) -> dict:
         "findings": _findings(st, snap),
         "audit": _audit(audit),
         "activity": _activity(snap),
+        "hunt": _hunt(st, snap),
     }
 
 
