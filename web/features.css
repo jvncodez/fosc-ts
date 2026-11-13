@@ -108,3 +108,65 @@ a:active,.row-link:active { color: var(--link-pressed); }
 .sidebar-bottom{flex:0 0 auto}
 /* o callout de emergência não encolhe */
 .sidebar-callout.emergency-callout{flex:0 0 auto}
+/* anel de foco desenha por dentro do item: a rolagem da nav não o corta */
+.main-nav .nav-item:focus-visible{outline-offset:-2px}
+
+/* no Terminal o banner de andamento é seguido direto pelo painel ao vivo;
+   dá o mesmo respiro que as outras telas têm */
+.campaign-banner + .term-panel{margin-top:16px}
+
+/* ---- Drawer de achado: Conselho estruturado + detalhes (interface rica) ---- */
+.fd-body{display:grid;gap:18px;line-height:1.55}
+.fd-url{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted)}
+.fd-url svg{width:15px;height:15px;color:var(--text-primary);flex:none}
+.fd-url code{background:var(--container-neutral-default);padding:3px 8px;border-radius:6px;word-break:break-all}
+.fd-section{display:grid;gap:8px}
+.fd-h{display:flex;align-items:center;gap:8px;font:700 15px/22px var(--font-titles)!important;margin:0;color:var(--text-default)}
+.fd-h svg{width:17px;height:17px;color:var(--text-primary);flex:none}
+.fd-section p{margin:0;font-size:14px;color:var(--text-muted)}
+.fd-steps{margin:0;padding-left:20px;display:grid;gap:7px;font-size:14px;color:var(--text-muted)}
+.fd-steps li{padding-left:3px}
+.fd-poc{display:grid;gap:0;border:1px solid var(--border-muted);border-radius:9px;overflow:hidden}
+.fd-poc-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;background:var(--container-neutral-default);font-size:12px;font-weight:700;color:var(--text-muted)}
+.fd-poc-bar>span{display:flex;align-items:center;gap:6px}
+.fd-poc-bar svg{width:14px;height:14px}
+.fd-poc .md-pre{margin:0;border:0;border-radius:0;max-height:none}
+.fd-poc small{padding:6px 12px;display:block;border-top:1px solid var(--border-muted)}
+.fd-flags{display:flex;flex-wrap:wrap;gap:7px}
+.fd-flag{font-size:12px;font-weight:600;padding:4px 9px;border-radius:999px;background:var(--container-neutral-default);border:1px solid var(--border-muted);color:var(--text-muted)}
+.fd-flag em{font-style:normal;opacity:.75}
+.fd-flag.lgpd{background:var(--status-warning-tint);border-color:var(--border-warning);color:var(--text-warning)}
+.fd-flag.cia{background:var(--status-info-tint);border-color:var(--border-info);color:var(--status-info)}
+.fd-flag.mitre{background:var(--container-primary-tint);border-color:var(--border-primary);color:var(--text-primary)}
+/* Painel do Conselho */
+.fd-council{padding:16px;border:1px solid var(--border-primary);border-radius:11px;background:var(--container-primary-tint)}
+.fd-verdict{font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;letter-spacing:.2px}
+.fd-verdict.ok{background:var(--status-success-tint);color:var(--status-success);border:1px solid var(--border-success)}
+.fd-verdict.veto{background:var(--status-critical-tint);color:var(--text-critical);border:1px solid var(--border-critical)}
+.fd-council-stats{margin:14px 0 2px}
+.fd-veto{margin-top:12px;padding:10px 12px;border-radius:8px;background:var(--status-critical-tint);border:1px solid var(--border-critical)}
+.fd-veto strong{display:block;font-size:13px;color:var(--text-critical);margin-bottom:5px}
+.fd-seats{display:grid;gap:10px;margin-top:14px}
+.fd-seat{padding:12px 14px;border-radius:9px;background:var(--surface-default,var(--container-neutral-default));border:1px solid var(--border-muted);border-left:3px solid var(--border-muted)}
+.fd-seat.ok{border-left-color:var(--status-success)}
+.fd-seat.veto{border-left-color:var(--status-critical)}
+.fd-seat-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.fd-seat-head strong{font-size:14px;color:var(--text-default)}
+.fd-seat-mark{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--container-neutral-hover);color:var(--text-muted)}
+.fd-seat.ok .fd-seat-mark{background:var(--status-success-tint);color:var(--status-success)}
+.fd-seat.veto .fd-seat-mark{background:var(--status-critical-tint);color:var(--text-critical)}
+.fd-seat p{font-size:13px;line-height:1.5;color:var(--text-muted);margin:7px 0 0}
+.fd-seat small{display:block;margin-top:8px;font-size:11px;color:var(--text-muted);opacity:.85}
+.fd-report{border-top:1px solid var(--border-muted);padding-top:12px}
+.fd-report summary{cursor:pointer;font-weight:700;font-size:14px;color:var(--text-primary)}
+.fd-report .report-md{margin-top:12px}
+
+/* ---- Sidebar: callout de emergência COMPACTO (o botão de parada também
+   está sempre no topo). Evita que a caixa coma a nav e corte itens. ---- */
+.sidebar .emergency-callout{padding:10px 12px;display:grid;gap:0}
+.sidebar .emergency-callout .callout-icon{display:none}
+.sidebar .emergency-callout strong{font-size:12px;line-height:16px}
+.sidebar .emergency-callout p{display:none}
+.sidebar .emergency-callout .button{width:100%;margin-top:8px}
+/* nav um pouco mais enxuta pra caber os 9 itens */
+.sidebar .main-nav .nav-item{height:38px}

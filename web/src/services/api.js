@@ -242,8 +242,10 @@ const liveApi = {
     try { return await jget('/api/campaigns'); } catch { return { campaigns: [], totals: {} }; }
   },
   async selectCampaign(target) {
+    // Só fixa o alvo; quem chama navega para #terminal e o renderRoute
+    // já busca o workspace — evita uma requisição /api/workspace redundante.
     live.target = String(target || '').trim(); live.confirmedIds = null;
-    return this.getWorkspace();
+    return { target: live.target };
   },
   async getFinding(id) {
     try { return await jget(`/api/finding?target=${encodeURIComponent(live.target || '')}&id=${encodeURIComponent(id)}`); }

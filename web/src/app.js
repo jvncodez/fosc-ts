@@ -203,6 +203,9 @@ async function renderRoute() {
     const pending=workspace.approvals.filter(item=>item.status==='pending').length;
     $('#approval-count').textContent=pending;
     $('#approval-count').hidden=!pending;
+    const confirmed=workspace.findings.filter(item=>item.classification==='confirmed').length;
+    const fc=$('#findings-count');
+    if(fc){fc.textContent=confirmed;fc.hidden=!confirmed;}
   } catch(error) {
     content.innerHTML=`${heading('Dados indisponíveis','Não foi possível carregar os dados do motor.')}<section class="panel empty-state">${icon('info')}<strong>Falha ao carregar os dados</strong><p>${esc(error.message)}</p><button class="button" data-action="retry">Tentar novamente</button></section>`;
   }
@@ -246,6 +249,54 @@ function md(src){
   return html;
 }
 let lastCurl='';
+const cap = s => { s = String(s ?? '').trim(); return s ? s[0].toUpperCase() + s.slice(1) : '—'; };
+const _RISCO = { nenhum:'Nenhum', baixo:'Baixo', medio:'Médio', alto:'Alto', critico:'Crítico' };
+const fdSection = (title, inner, icn='') => inner ? `<div class="fd-section"><h3 class="fd-h">${icn?icon(icn):''}${esc(title)}</h3>${inner}</div>` : '';
+
+function councilPanel(c){
+  if(!c) return '';
+  const aprovado = !!c.aprovado;
+  const sevFinal = String(c.severidade_final||'').toLowerCase();
+  const stats = `<div class="report-stats fd-council-stats">
+    <div><strong>${c.cadeiras_ok ?? 0}/5</strong><span>Cadeiras a favor</span></div>
+    <div><strong>${esc(severity[sevFinal] || c.severidade_final || '—')}</strong><span>Severidade corp.</span></div>
+    <div><strong>${esc(cap(c.confianca_final))}</strong><span>Confiança</span></div>
+    <div><strong>${esc(_RISCO[c.risco_corporativo] || c.risco_corporativo || '—')}</strong><span>Risco corp.</span></div></div>`;
+  const flags = [
+    c.lgpd_dado_pessoal ? `<span class="fd-flag lgpd">LGPD · dado pessoal</span>` : '',
+    ...(c.cia_pilares || []).map(p => `<span class="fd-flag cia">${esc(cap(p))}</span>`)
+  ].filter(Boolean).join('');
+  const vetos = (c.motivos_veto && c.motivos_veto.length)
+    ? `<div class="fd-veto"><strong>Motivos de veto</strong><ul class="md-ul">${c.motivos_veto.map(v => `<li>${esc(typeof v==='string'?v:(v.motivo||v.motivo_veto||JSON.stringify(v)))}</li>`).join('')}</ul></div>` : '';
+  const seats = (c.pareceres || []).map(p => `<div class="fd-seat ${p.veto?'veto':(p.ok?'ok':'')}">
+    <div class="fd-seat-head"><strong>${esc(p.nome || p.cadeira || 'Cadeira')}</strong><span class="fd-seat-mark">${p.veto?'VETO':(p.ok?'OK':'—')}</span></div>
+    ${p.parecer?`<p>${esc(p.parecer)}</p>`:''}
+    <small>Severidade: ${esc(p.severidade_sugerida||'—')} · Confiança: ${esc(p.confianca||'—')} · Risco: ${esc(_RISCO[p.risco]||p.risco||'—')}${p.motivo_veto?` · Veto: ${esc(p.motivo_veto)}`:''}</small></div>`).join('');
+  return `<div class="fd-section fd-council">
+    <h3 class="fd-h">${icon('shield')}Parecer do Conselho<span class="fd-verdict ${aprovado?'ok':'veto'}">${aprovado?'APROVADO':'VETADO'}</span></h3>
+    ${stats}
+    ${flags?`<div class="fd-flags">${flags}</div>`:''}
+    ${vetos}
+    ${seats?`<div class="fd-seats">${seats}</div>`:''}</div>`;
+}
+
+function findingBody(f, report){
+  const steps = Array.isArray(f.steps) ? f.steps : (f.steps ? [f.steps] : []);
+  const mitre = (f.mitre || []).map(m => `<span class="fd-flag mitre">${esc(m.id||'')}${m.name?` · ${esc(m.name)}`:''}${m.tactic?` <em>(${esc(m.tactic)})</em>`:''}</span>`).join('');
+  const poc = f.repro_curl ? `<div class="fd-poc"><div class="fd-poc-bar"><span>${icon('terminal')}PoC · curl</span><button class="button button-small" data-action="copy-curl">${icon('terminal')} Copiar</button></div><pre class="md-pre"><code>${esc(f.repro_curl)}</code></pre>${f.report_path?`<small class="muted">Relatório: ${esc(f.report_path)}</small>`:''}</div>` : '';
+  return `
+    ${f.url?`<div class="fd-url">${icon('radar')}<code>${esc(f.url)}</code></div>`:''}
+    ${fdSection('Resumo', f.summary?`<p>${esc(f.summary)}</p>`:'')}
+    ${fdSection('Impacto', f.impact?`<p>${esc(f.impact)}</p>`:'')}
+    ${fdSection('Passos de reprodução', steps.length?`<ol class="fd-steps">${steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol>`:'')}
+    ${fdSection('Prova de conceito', poc)}
+    ${f.shell_obtained?fdSection('Shell obtido no alvo', `<p>${esc(f.shell_howto||'Execução de comando confirmada no alvo.')}</p>`):''}
+    ${fdSection('Verificação adversarial', f.review?`<p>${esc(f.review)}</p>`:'')}
+    ${councilPanel(f.council)}
+    ${fdSection('MITRE ATT&CK', mitre?`<div class="fd-flags">${mitre}</div>`:'')}
+    ${report?`<details class="fd-report"><summary>Relatório completo (report.md)</summary><div class="report-md">${md(report)}</div></details>`:(f.summary||f.evidence_marker)?'':`<p class="muted">Sem detalhes adicionais. Evidência: ${esc(f.evidence_marker||'—')}</p>`}`;
+}
+
 async function openFindingDrawer(id){
   const layer=$('#modal-layer');
   layer.innerHTML=`<div class="modal-backdrop" data-action="dismiss-modal"><section class="modal finding-modal" role="dialog" aria-modal="true" aria-label="Detalhe do achado" style="max-width:900px;width:94vw;text-align:left"><div class="modal-head"><div><div class="eyebrow">${esc(id)}</div><h2>Carregando achado…</h2></div><button class="modal-close" data-action="close-modal" aria-label="Fechar">${icon('close')}</button></div><div class="finding-modal-body" style="max-height:72vh;overflow:auto"><div class="loading-bar"></div></div></section></div>`;
@@ -257,10 +308,11 @@ async function openFindingDrawer(id){
   const sev=String(f.severity||'info').toLowerCase();
   const council=f.council||{};
   const tag=(t)=>`<span class="status-pill">${esc(t)}</span>`;
-  if(head)head.innerHTML=`<div><div class="eyebrow">${esc(f.id||id)}${f.vuln_class?` · ${esc(f.vuln_class)}`:''}</div><h2>${esc(f.title||'Achado')}</h2><div class="finding-modal-tags" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><span class="severity-pill ${sev}">${severity[sev]||sev}</span>${f.cvss?tag('CVSS '+f.cvss):''}${f.confidence?tag('Confiança '+f.confidence):''}${council.severidade_final?tag('Conselho: '+council.severidade_final):''}${council.decisao?tag(council.decisao):''}</div></div><button class="modal-close" data-action="close-modal" aria-label="Fechar">${icon('close')}</button>`;
+  const hasCouncil=council&&Object.keys(council).length;
+  const verdict=hasCouncil?`<span class="fd-verdict ${council.aprovado?'ok':'veto'}">Conselho: ${council.aprovado?'APROVADO':'VETADO'} · ${council.cadeiras_ok??0}/5</span>`:'';
+  if(head)head.innerHTML=`<div><div class="eyebrow">${esc(f.id||id)}${f.vuln_class?` · ${esc(f.vuln_class)}`:''}</div><h2>${esc(f.title||'Achado')}</h2><div class="finding-modal-tags" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><span class="severity-pill ${sev}">${severity[sev]||sev}</span>${f.cvss?tag('CVSS '+f.cvss):''}${f.confidence?tag('Confiança '+cap(f.confidence)):''}${verdict}</div></div><button class="modal-close" data-action="close-modal" aria-label="Fechar">${icon('close')}</button>`;
   const report=res.report||'';
-  const actions=f.repro_curl?`<div class="finding-modal-actions" style="display:flex;gap:8px;align-items:center;margin-bottom:12px"><button class="button button-small" data-action="copy-curl">${icon('terminal')} Copiar curl (PoC)</button>${f.poc_path?`<small class="muted">PoC: ${esc(f.poc_path)}</small>`:''}</div>`:'';
-  body.innerHTML=`${actions}<div class="report-md" style="line-height:1.55">${report?md(report):`<p>Sem relatório gerado. Evidência: ${esc(f.evidence_marker||f.summary||'—')}</p>`}</div>`;
+  body.innerHTML=`<div class="fd-body">${findingBody(f, report)}</div>`;
 }
 async function updateAndRender(message, route=location.hash.replace(/^#/, '')||'campaign') {
   closeModal();
