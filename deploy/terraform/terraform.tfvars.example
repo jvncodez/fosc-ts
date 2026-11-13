@@ -6,11 +6,16 @@ aws_region = "us-east-1"
 vpc_id             = "vpc-xxxxxxxx"
 private_subnet_ids = ["subnet-aaaa", "subnet-bbbb"]
 
-# IP(s) do ALVO AUTORIZADO — o egress 80/443 é liberado SÓ p/ estes.
-allowed_target_cidrs = ["44.227.89.148/32"]
+# O ALVO é definido pela URL/host (target_url) — a contenção de escopo REAL é
+# por host, no scope.py com SENTINELA_SCOPE_PROXY=1. O allowed_target_cidrs abaixo
+# é só o egress do security group (AWS SG não aceita hostname, só IP): ele apenas
+# precisa deixar a borda da Cloudflare alcançável. NÃO trave em /32 resolvido do
+# domínio — a Cloudflare é anycast e rotaciona. Use as FAIXAS OFICIAIS da Cloudflare
+# (https://www.cloudflare.com/ips-v4). As duas que cobrem 1.migbot.com.br hoje:
+allowed_target_cidrs = ["104.16.0.0/13", "172.64.0.0/13"]
 
-# Escopo do agente.
-target_url = "https://1.migbot.com.br/#/"
+# Escopo do agente — define o alvo pela URL/host (quem limita ao migbot é o host).
+target_url = "https://1.migbot.com.br/"
 fosc_args  = "--continuous --interval 3600"
 max_hunts  = 5
 
@@ -21,10 +26,11 @@ assign_public_ip     = false
 # O serviço começa parado; suba quando quiser rodar o worker da fila.
 desired_count = 0
 
-# Bedrock — confira os inference-profile ids liberados na sua região/conta.
-# bedrock_sonnet = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-# bedrock_opus   = "us.anthropic.claude-opus-4-1-20250805-v1:0"
-# bedrock_haiku  = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+# Bedrock — use os modelos Claude 5 ACTIVE (a família 5.x é REAL e atual; NÃO use
+# os 4.x, que estão LEGACY). Confira os ids/inference-profile liberados na conta:
+# bedrock_sonnet = "anthropic.claude-sonnet-5-5"   # caçar
+# bedrock_opus   = "anthropic.claude-opus-5-5"     # revalidar confirmados
+# bedrock_haiku  = "anthropic.claude-haiku-5-5"    # auxiliar/barato
 
 # Telegram — NÃO ponha valores reais aqui. Passe na hora do apply:
 #   TF_VAR_telegram_token=... TF_VAR_telegram_chat_id=... terraform apply
