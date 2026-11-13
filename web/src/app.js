@@ -150,6 +150,7 @@ function renderPage(route) {
 }
 
 async function renderRoute() {
+  closeProfileMenu();
   const route=location.hash.replace(/^#\/?/,'')||'campaign';
   if(!names[route]) { location.hash='#campaign'; return; }
   $('#breadcrumb-current').textContent=names[route];
@@ -183,6 +184,62 @@ function openEmergencyDialog() {
   $('#modal-layer [data-action="confirm-emergency"]').focus();
 }
 function closeModal(){const layer=$('#modal-layer');layer.innerHTML='';layer.setAttribute('aria-hidden','true');}
+let activeProfileTrigger = null;
+
+function closeProfileMenu({ restoreFocus = false } = {}) {
+  const menu = $('#profile-menu');
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  $$('.profile-menu-trigger').forEach(trigger => trigger.setAttribute('aria-expanded', 'false'));
+  if (restoreFocus && activeProfileTrigger) activeProfileTrigger.focus();
+  activeProfileTrigger = null;
+}
+
+function openProfileMenu(trigger, { focusItem = false } = {}) {
+  const menu = $('#profile-menu');
+  if (!menu || $('#logout-link').hidden) return;
+  activeProfileTrigger = trigger;
+  $$('.profile-menu-trigger').forEach(item => item.setAttribute('aria-expanded', String(item === trigger)));
+  menu.hidden = false;
+  const rect = trigger.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  const left = Math.min(window.innerWidth - menuRect.width - 12, Math.max(12, rect.right - menuRect.width));
+  const preferredTop = trigger.id === 'top-profile-trigger' ? rect.bottom + 8 : rect.top - menuRect.height - 8;
+  const top = Math.min(window.innerHeight - menuRect.height - 12, Math.max(12, preferredTop));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  if (focusItem) $('#logout-link').focus();
+}
+
+function toggleProfileMenu(trigger, options = {}) {
+  const menu = $('#profile-menu');
+  if (!menu.hidden && activeProfileTrigger === trigger) closeProfileMenu({ restoreFocus: options.focusItem });
+  else openProfileMenu(trigger, options);
+}
+
+async function renderIdentity() {
+  try {
+    const response = await fetch(new URL('api/session', document.baseURI), { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    if (response.status === 401) { location.assign(new URL('auth/login', document.baseURI)); return; }
+    if (!response.ok) return;
+    const session = await response.json();
+    const user = session.user || {};
+    const email = user.email || '';
+    const username = user['cognito:username'] || '';
+    const displayName = user.name || (email ? email.split('@')[0] : username) || 'Conta autenticada';
+    $('#profile-name').textContent = displayName;
+    $('#profile-role').textContent = email || username || 'Usuário autenticado';
+    $('#profile-role').title = email || username;
+    $('#profile-menu-name').textContent = displayName;
+    $('#profile-menu-email').textContent = email || username || 'Usuário autenticado';
+    const initials = String(displayName).split(/\s+|@/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase();
+    $('#profile-avatar').textContent = initials;
+    $('#profile-menu-avatar').textContent = initials;
+    $('#top-profile-trigger').textContent = initials;
+    $('#logout-link').hidden = !session.enabled;
+  } catch { /* Keep the dashboard usable during a transient local connection failure. */ }
+}
+
 async function updateAndRender(message, route=location.hash.replace(/^#/, '')||'campaign') {
   closeModal();
   try { workspace=await api.getWorkspace(); location.hash=`#${route}`; if(location.hash===`#${route}`) { await renderRoute(); } if(message)toast(message); }
@@ -190,6 +247,9 @@ async function updateAndRender(message, route=location.hash.replace(/^#/, '')||'
 }
 
 document.addEventListener('click',async event=>{
+  const profileTrigger=event.target.closest('[data-action="toggle-profile-menu"]');
+  if(profileTrigger){event.preventDefault();toggleProfileMenu(profileTrigger);return;}
+  if(!event.target.closest('#profile-menu'))closeProfileMenu();
   const target=event.target.closest('button,a,[data-action]');
   if(!target)return;
   const action=target.dataset.action;
@@ -231,15 +291,25 @@ document.addEventListener('submit',async event=>{
     await renderRoute();toast('Campanha iniciada em modo demonstrativo.');
   }catch(error){toast(error.message);}
 });
-document.addEventListener('keydown',event=>{if(event.key==='Escape')closeModal();});
+document.addEventListener('keydown',event=>{
+  const trigger=event.target.closest?.('[data-action="toggle-profile-menu"]');
+  if(trigger&&event.key==='ArrowDown'){event.preventDefault();openProfileMenu(trigger,{focusItem:true});return;}
+  if(event.key==='Escape'){closeProfileMenu({restoreFocus:true});closeModal();}
+});
+window.addEventListener('resize',()=>closeProfileMenu());
 window.addEventListener('hashchange',renderRoute);
 
 setInterval(async()=>{
   if(!workspace||workspace.campaign.status!=='running')return;
-  workspace=await api.advanceCampaign();
-  const here=location.hash||'#campaign';
-  if(here==='#campaign')content.innerHTML=campaignView();
-  else if(here==='#terminal')refreshTerminal();
+  try {
+    workspace=await api.advanceCampaign();
+    const here=location.hash||'#campaign';
+    if(here==='#campaign')content.innerHTML=campaignView();
+    else if(here==='#terminal')refreshTerminal();
+  } catch(error) {
+    if(error.message!=='AUTH_REQUIRED')toast(error.message);
+  }
 },5000);
 
+renderIdentity();
 renderRoute();

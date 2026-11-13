@@ -661,6 +661,13 @@ Acesse:
 http://127.0.0.1:5555
 ```
 
+### Login opcional com Amazon Cognito
+
+O viewer serve o frontend em `web/` junto com a API real. Para exigir login
+antes do dashboard, das APIs e dos eventos SSE, configure um User Pool público
+e carregue `.env.cognito` antes de iniciar o viewer. O procedimento completo
+está em [`docs/cognito-local-viewer.md`](docs/cognito-local-viewer.md).
+
 ### Interface
 
 O painel apresenta uma interface dark com identidade visual vermelha, organizada para facilitar o monitoramento das operações.

@@ -9,6 +9,9 @@ venv/
 # runtime state & secrets (never commit)
 .fosc/
 .bb-sentinela/
+.env
+.env.*
+!.env.cognito.example
 *.log
 config.json
 
