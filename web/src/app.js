@@ -288,6 +288,7 @@ function md(src){
 let lastCurl='';
 const cap = s => { s = String(s ?? '').trim(); return s ? s[0].toUpperCase() + s.slice(1) : '—'; };
 const _RISCO = { nenhum:'Nenhum', baixo:'Baixo', medio:'Médio', alto:'Alto', critico:'Crítico' };
+const _SEV_CLS = { critical:'critical', high:'high', medium:'medium', low:'low', info:'low' };
 const fdSection = (title, inner, icn='') => inner ? `<div class="fd-section"><h3 class="fd-h">${icn?icon(icn):''}${esc(title)}</h3>${inner}</div>` : '';
 
 function councilPanel(c){
@@ -305,10 +306,20 @@ function councilPanel(c){
   ].filter(Boolean).join('');
   const vetos = (c.motivos_veto && c.motivos_veto.length)
     ? `<div class="fd-veto"><strong>Motivos de veto</strong><ul class="md-ul">${c.motivos_veto.map(v => `<li>${esc(typeof v==='string'?v:(v.motivo||v.motivo_veto||JSON.stringify(v)))}</li>`).join('')}</ul></div>` : '';
+  const seatMeta = p => {
+    const sv = String(p.severidade_sugerida||'').toLowerCase();
+    const chips = [
+      p.severidade_sugerida?`<span class="fd-chip sev ${_SEV_CLS[sv]||''}">${esc(severity[sv]||p.severidade_sugerida)}</span>`:'',
+      p.confianca?`<span class="fd-chip">Confiança ${esc(cap(p.confianca))}</span>`:'',
+      (p.risco!=null&&p.risco!=='')?`<span class="fd-chip">Risco ${esc(_RISCO[p.risco]||p.risco)}</span>`:'',
+      p.motivo_veto?`<span class="fd-chip veto">Veto: ${esc(p.motivo_veto)}</span>`:'',
+    ].filter(Boolean).join('');
+    return chips?`<div class="fd-seat-meta">${chips}</div>`:'';
+  };
   const seats = (c.pareceres || []).map(p => `<div class="fd-seat ${p.veto?'veto':(p.ok?'ok':'')}">
     <div class="fd-seat-head"><strong>${esc(p.nome || p.cadeira || 'Cadeira')}</strong><span class="fd-seat-mark">${p.veto?'VETO':(p.ok?'OK':'—')}</span></div>
     ${p.parecer?`<p>${esc(p.parecer)}</p>`:''}
-    <small>Severidade: ${esc(p.severidade_sugerida||'—')} · Confiança: ${esc(p.confianca||'—')} · Risco: ${esc(_RISCO[p.risco]||p.risco||'—')}${p.motivo_veto?` · Veto: ${esc(p.motivo_veto)}`:''}</small></div>`).join('');
+    ${seatMeta(p)}</div>`).join('');
   return `<div class="fd-section fd-council">
     <h3 class="fd-h">${icon('shield')}Parecer do Conselho<span class="fd-verdict ${aprovado?'ok':'veto'}">${aprovado?'APROVADO':'VETADO'}</span></h3>
     ${stats}
@@ -347,6 +358,8 @@ async function openFindingDrawer(id){
   }
   const f=res.finding||{}; lastCurl=f.repro_curl||'';
   const sev=String(f.severity||'info').toLowerCase();
+  const sevKey=(sev==='critical'||sev==='high')?sev:(sev==='medium'?'medium':'low');
+  const modalEl=$('.finding-modal'); if(modalEl)modalEl.classList.add('sev-'+sevKey);
   const council=f.council||{};
   const tag=(t)=>`<span class="status-pill">${esc(t)}</span>`;
   const hasCouncil=council&&Object.keys(council).length;

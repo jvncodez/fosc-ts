@@ -199,3 +199,30 @@ a:active,.row-link:active { color: var(--link-pressed); }
 /* Ações no rodapé do card de campanha (apagar campanha) */
 .fleet-card-actions{display:flex;justify-content:flex-end;margin-top:12px;padding-top:12px;border-top:1px solid var(--border, rgba(255,255,255,.08))}
 .fleet-card-actions .button{position:relative;z-index:2}
+
+/* ===== Modal de achado — refino visual ===== */
+/* faixa de severidade no topo do modal */
+.finding-modal{position:relative}
+.finding-modal::before{content:"";position:absolute;top:0;left:0;right:0;height:4px;border-radius:14px 14px 0 0;background:var(--text-muted)}
+.finding-modal.sev-critical::before,.finding-modal.sev-high::before{background:var(--status-critical)}
+.finding-modal.sev-medium::before{background:var(--status-warning)}
+.finding-modal.sev-low::before{background:var(--status-info)}
+/* acento à esquerda nos títulos de seção (menos no Conselho, que já tem ícone+caixa) */
+.fd-section:not(.fd-council)>.fd-h::before{content:"";width:3px;height:16px;border-radius:2px;background:var(--text-primary);flex:none}
+.fd-section:not(.fd-council):not(:first-child){padding-top:18px;border-top:1px solid var(--border-muted)}
+/* stats do Conselho: de caixas grandes para chips compactos */
+.fd-council-stats{display:flex!important;flex-wrap:wrap;gap:8px;margin:12px 0 2px;grid-template-columns:none!important}
+.fd-council-stats>div{display:flex;align-items:baseline;gap:6px;padding:6px 12px;background:var(--surface-default,#fff);border:1px solid var(--border-muted);border-radius:999px;text-align:left}
+.fd-council-stats>div strong{font-size:14px;color:var(--text-default)}
+.fd-council-stats>div span{font-size:12px;color:var(--text-muted)}
+/* metadados das cadeiras como chips */
+.fd-seat-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.fd-chip{font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--container-neutral-default);border:1px solid var(--border-muted);color:var(--text-muted)}
+.fd-chip.sev.critical,.fd-chip.sev.high{background:var(--status-critical-tint);border-color:var(--border-critical);color:var(--text-critical)}
+.fd-chip.sev.medium{background:var(--status-warning-tint);border-color:var(--border-warning);color:var(--text-warning)}
+.fd-chip.sev.low{background:var(--status-info-tint);border-color:var(--border-info);color:var(--status-info)}
+.fd-chip.veto{background:var(--status-critical-tint);border-color:var(--border-critical);color:var(--text-critical)}
+/* cabeçalho do Conselho e cadeiras um pouco mais respiráveis */
+.fd-council .fd-h{margin-bottom:2px}
+.fd-seat{padding:13px 15px}
+.fd-seat-head strong{font:700 14px/20px var(--font-titles)}
