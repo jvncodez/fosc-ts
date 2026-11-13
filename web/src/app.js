@@ -147,7 +147,9 @@ function terminalView() {
   const count = key => key === 'all' ? workspace.commands.length : workspace.commands.filter(r => r.status === key).length;
   const shown = workspace.commands.filter(r => terminalFilter === 'all' || r.status === terminalFilter);
   const feed = workspace.activity || [];
-  return `${heading('Terminal da campanha', 'Atividade do agente ao vivo e as linhas de comando registradas, com o estado de cada uma frente à política.', `<button class="button" data-action="export">${icon('download')} Exportar terminal</button>`)}
+  const confirmed = workspace.findings.filter(f => f.classification === 'confirmed').length;
+  return `${heading('Terminal da campanha', 'Andamento em tempo real: o que o agente está fazendo agora, com progresso e achados.', `<button class="button" data-action="export">${icon('download')} Exportar terminal</button>`)}
+    <section class="campaign-banner scope-boundary ${live ? 'is-running' : ''}"><div><div class="campaign-kicker"><span class="pulse ${live ? 'on' : ''}"></span> ${live ? 'AO VIVO' : 'SEM EXECUÇÃO ATIVA'}</div><h2>${esc(c.target)}</h2><p>${statusPill(c.status, labels[c.status] || c.status)} · ${c.progress}% · ${confirmed} achado(s) confirmado(s)</p></div><div class="campaign-banner-side"><a class="button button-small" href="#findings">${icon('bug')} Ver achados</a></div></section>
     <section class="panel term-panel"><div class="term-bar"><div class="term-bar-title">${icon('terminal')}<strong>Atividade ao vivo · ${esc(c.target)}</strong></div><div class="term-bar-state"><span class="term-dot ${live ? 'on' : ''}"></span>${live ? 'Ao vivo' : 'Sem execução ativa'}</div></div>
       <div class="term-body" id="feed-body" role="log" aria-live="polite" aria-label="Atividade ao vivo do agente">${feed.map(feedLine).join('') || `<div class="empty-state compact"><strong>Sem atividade registrada</strong><p>O feed do agente (recon, vereditos, achados) aparece aqui durante a campanha.</p></div>`}</div></section>
     <div class="finding-tabs term-filters">${filters.map(([key, label]) => `<button class="filter-tab ${terminalFilter === key ? 'active' : ''}" data-terminal-filter="${key}">${label}<span>${count(key)}</span></button>`).join('')}</div>
@@ -294,7 +296,7 @@ document.addEventListener('click',async event=>{
   }
   else if(action==='export'){downloadSnapshot();toast('Snapshot JSON exportado.');}
   else if(action==='go-audit'){location.hash='#audit';}
-  else if(action==='open-campaign'){try{await api.selectCampaign(target.dataset.campaign);}catch(error){toast(error.message);}location.hash='#campaign';}
+  else if(action==='open-campaign'){try{await api.selectCampaign(target.dataset.campaign);}catch(error){toast(error.message);}location.hash='#terminal';}
   else if(action==='open-finding'){event.preventDefault();await openFindingDrawer(target.dataset.id);}
   else if(action==='copy-curl'){try{await navigator.clipboard.writeText(lastCurl||'');toast('Curl copiado.');}catch{toast('Não foi possível copiar.');}}
   else if(action==='retry')await renderRoute();

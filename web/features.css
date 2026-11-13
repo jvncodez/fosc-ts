@@ -100,3 +100,11 @@ a:active,.row-link:active { color: var(--link-pressed); }
 .term-line.term-feed .term-prompt{color:var(--hacka-coral)}
 .term-line.feed-finding code,.term-line.feed-confirmed code{color:#7ee787}
 .term-line.feed-system{opacity:.82}
+
+/* ---- Sidebar: navegação rola; marca (topo) e rodapé (emergência + perfil)
+   ficam SEMPRE visíveis, mesmo com muitos itens ou tela baixa ---- */
+.sidebar{overflow:hidden}
+.main-nav{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden}
+.sidebar-bottom{flex:0 0 auto}
+/* o callout de emergência não encolhe */
+.sidebar-callout.emergency-callout{flex:0 0 auto}
