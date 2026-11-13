@@ -59,6 +59,26 @@ TARGET_RX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-:/_]{0,250}$")
 LIVE = ("running", "paused", "sleeping", "recon")
 
 
+def _auth_error_page(message: str, login_url: str) -> bytes:
+    """Small Portuguese error page shown when a Cognito callback is rejected."""
+    safe_url = login_url.replace('"', "%22")
+    return (
+        "<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        "<title>FOSC/TS — Login</title>"
+        "<style>body{margin:0;min-height:100vh;display:grid;place-items:center;"
+        "font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f4f7fc;color:#1d2940}"
+        ".card{background:#fff;border:1px solid #e3e9f2;border-radius:12px;padding:28px 32px;"
+        "max-width:380px;text-align:center;box-shadow:0 14px 38px #1725411a}"
+        "h1{font-size:18px;margin:0 0 8px}p{font-size:13px;color:#59667d;margin:0 0 18px}"
+        "a{display:inline-block;background:#1f6fb5;color:#fff;text-decoration:none;"
+        "font-size:13px;font-weight:700;padding:10px 18px;border-radius:7px}</style></head>"
+        f"<body><div class=\"card\"><h1>{message}</h1>"
+        "<p>Volte para a página de login e tente novamente.</p>"
+        f"<a href=\"{safe_url}\">Voltar para o login</a></div></body></html>"
+    ).encode("utf-8")
+
+
 def overview() -> dict:
     targets, tot_conf, tot_cost = [], 0, 0.0
     for st in list_runs():
@@ -227,7 +247,7 @@ def set_config(p: dict) -> dict:
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "FOSC-TS-Viewer"
     port = 5555
-    # Set only by run_viewer after the configuration has passed fail-closed checks.
+    # Initialized only after Cognito configuration succeeds, before the port binds.
     auth: CognitoAuth | None = None
 
     def log_message(self, fmt, *args):
@@ -236,14 +256,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # -- guards ----------------------------------------------------------
     def _host_ok(self) -> bool:
         host = (self.headers.get("Host") or "").lower()
-        return host in (f"127.0.0.1:{self.port}", f"localhost:{self.port}")
+        allowed = {f"127.0.0.1:{self.port}", f"localhost:{self.port}"}
+        if self.auth:
+            allowed.add(urlparse(self.auth.settings.public_url).netloc.lower())
+        return host in allowed
 
     def _post_ok(self) -> bool:
         if self.headers.get("X-FOSC") != "1":
             return False
-        # Cookies make an Origin check essential. The browser client uses this
-        # canonical loopback origin after Cognito redirects back from login.
-        return self.headers.get("Origin") == f"http://127.0.0.1:{self.port}"
+        origin = self.headers.get("Origin")
+        if self.auth:
+            return origin == self.auth.settings.public_origin
+        return origin in (None, f"http://127.0.0.1:{self.port}", f"http://localhost:{self.port}")
 
     def _session(self):
         return self.auth.session(self.headers) if self.auth else {}
@@ -254,7 +278,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path.startswith("/api/"):
             self._json({"ok": False, "error": "authentication required"}, 401)
         else:
-            self._redirect("/auth/login")
+            self._redirect(f"{self.auth.settings.public_url}/auth/login")
         return True
 
     # -- responses -------------------------------------------------------
@@ -277,16 +301,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(json.dumps(obj).encode(), "application/json; charset=utf-8", status)
 
     def _redirect(self, location: str, cookies: list[str] | None = None):
-        self._send(b"", "text/plain; charset=utf-8", 302, [("Location", location)] + [("Set-Cookie", cookie) for cookie in (cookies or [])])
+        self._send(b"", "text/plain; charset=utf-8", 302,
+                   [("Location", location)] + [("Set-Cookie", cookie) for cookie in (cookies or [])])
 
     def _auth_callback(self, query: dict[str, str]):
+        login_url = f"{self.auth.settings.public_url}/auth/login"
         if query.get("error"):
-            return self._send(b"Login cancelled or failed. Return to the login page and try again.", "text/plain; charset=utf-8", 400)
+            return self._send(_auth_error_page("Login cancelado ou não concluído.", login_url),
+                              "text/html; charset=utf-8", 400)
         identity, cookies = self.auth.complete(self.headers, query)
         if not identity:
-            return self._send(b"Login verification failed. Return to the login page and try again.", "text/plain; charset=utf-8", 400,
+            return self._send(_auth_error_page("Não foi possível verificar o login.", login_url),
+                              "text/html; charset=utf-8", 400,
                               [("Set-Cookie", cookie) for cookie in cookies])
-        return self._redirect("/", cookies)
+        return self._redirect(f"{self.auth.settings.public_url}/", cookies)
 
     def do_GET(self):
         if not self._host_ok():
@@ -294,7 +322,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
 
-        # These routes are the only unauthenticated surface when Cognito is on.
+        # The only unauthenticated routes when Cognito is enabled.
         if self.auth and u.path == "/auth/login":
             location, cookie = self.auth.begin()
             return self._redirect(location, [cookie])
@@ -311,7 +339,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = (WEB_DIR / name).read_bytes() if name else b"/* live: sem mock */\n"
             return self._send(body, ctype)
         if u.path == "/api/session":
-            return self._json({"ok": True, "user": self._session()})
+            return self._json({"ok": True, "enabled": bool(self.auth), "user": self._session()})
         if u.path == "/api/overview":
             return self._json(overview())
         if u.path == "/api/workspace":
@@ -414,8 +442,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 def run_viewer(port: int, preselect_target: str | None = None):
-    # Validate before binding so a partially configured login cannot expose the
-    # panel with its protection silently disabled.
+    # Validate authentication before binding so an incomplete Cognito setup
+    # cannot accidentally leave the operator dashboard unprotected.
     settings = CognitoSettings.from_environment(port)
     Handler.port = port
     Handler.auth = CognitoAuth(settings) if settings else None
@@ -423,7 +451,8 @@ def run_viewer(port: int, preselect_target: str | None = None):
     server.daemon_threads = True
     url = f"http://127.0.0.1:{port}/" + (f"#/t/{preselect_target}" if preselect_target else "")
     auth_note = " · Cognito login required" if settings else " · Cognito disabled"
-    print(f"[fosc] viewer: {url}  (127.0.0.1 only{auth_note}; Ctrl+C para fechar; caçadas continuam rodando)")
+    location = settings.public_url if settings else url
+    print(f"[fosc] viewer: {location}/  (127.0.0.1 only{auth_note}; Ctrl+C para fechar; caçadas continuam rodando)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

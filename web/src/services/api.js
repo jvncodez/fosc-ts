@@ -171,13 +171,21 @@ export function subscribeToUpdates(url, onUpdate, onError = () => {}) {
  * ========================================================================== */
 const live = { target: null, confirmedIds: null };
 
+function dashboardUrl(path) {
+  return new URL(String(path).replace(/^\/+/, ''), document.baseURI).toString();
+}
+function requireLogin() {
+  window.location.assign(dashboardUrl('auth/login'));
+}
 async function jget(path) {
-  const r = await fetch(path, { headers: { Accept: 'application/json' } });
+  const r = await fetch(dashboardUrl(path), { headers: { Accept: 'application/json' } });
+  if (r.status === 401) { requireLogin(); throw new Error('AUTH_REQUIRED'); }
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 async function jpost(path, body) {
-  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-FOSC': '1' }, body: JSON.stringify(body || {}) });
+  const r = await fetch(dashboardUrl(path), { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-FOSC': '1' }, body: JSON.stringify(body || {}) });
+  if (r.status === 401) { requireLogin(); throw new Error('AUTH_REQUIRED'); }
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
@@ -208,7 +216,10 @@ const liveApi = {
       live.target = ws.campaign?.target || live.target;
       noteFindings(ws);
       return ws;
-    } catch { return mockApi.getWorkspace(); }
+    } catch (error) {
+      if (error.message === 'AUTH_REQUIRED') throw error;
+      return mockApi.getWorkspace();
+    }
   },
   async advanceCampaign() { return this.getWorkspace(); }, // o motor avança sozinho; aqui só re-busca (+toast)
   async updateTarget(target) {
@@ -226,11 +237,18 @@ const liveApi = {
       if (r.error) throw new Error(r.error);
       live.target = r.target || body.target; live.confirmedIds = null;  // alvo normalizado pelo backend
       return this.getWorkspace();
-    } catch (e) { if (/^HTTP /.test(e.message)) return mockApi.startCampaign({ target, authorized }); throw e; }
+    } catch (error) {
+      if (error.message === 'AUTH_REQUIRED') throw error;
+      if (/^HTTP /.test(error.message)) return mockApi.startCampaign({ target, authorized });
+      throw error;
+    }
   },
   async emergencyStop() {
     try { await jpost('/api/halt', { target: live.target }); return this.getWorkspace(); }
-    catch { return mockApi.emergencyStop(); }
+    catch (error) {
+      if (error.message === 'AUTH_REQUIRED') throw error;
+      return mockApi.emergencyStop();
+    }
   },
   async resolveApproval(id, decision) {
     const r = await jpost('/api/approval', { target: live.target, id, decision });
