@@ -2,15 +2,18 @@
 
 <img src="assets/banner.svg" alt="FOSC AGENT" width="560">
 
-### Ferramenta Ofensiva de Segurança Cibernética
+### Ferramenta Ofensiva de Segurança Cibernética · FOSC / TS
 
-![FOSC AGENT](https://img.shields.io/badge/FOSC%20AGENT-RED%20TEAM-E53935?style=for-the-badge)
-![Python](https://img.shields.io/badge/Python-3.11%2B-181818?style=flat-square&logo=python&logoColor=E53935)
-![Go](https://img.shields.io/badge/Go-1.21%2B-181818?style=flat-square&logo=go&logoColor=E53935)
-![Claude Code](https://img.shields.io/badge/Claude%20Code-CLI-181818?style=flat-square)
-![License](https://img.shields.io/badge/License-MIT-E53935?style=flat-square)
+![FOSC TS](https://img.shields.io/badge/FOSC-%2F%20TS-003399?style=for-the-badge&labelColor=FADC00)
+![Hackathon BBTS](https://img.shields.io/badge/Hackathon-BBTS-FADC00?style=for-the-badge&labelColor=003399)
+![Python](https://img.shields.io/badge/Python-3.11%2B-003399?style=flat-square&logo=python&logoColor=FADC00)
+![Go](https://img.shields.io/badge/Go-1.21%2B-003399?style=flat-square&logo=go&logoColor=FADC00)
+![Claude Code](https://img.shields.io/badge/Claude%20Code-CLI-181818?style=flat-square&logoColor=FADC00)
+![License](https://img.shields.io/badge/License-MIT-003399?style=flat-square)
 
 **Um agente autônomo de segurança ofensiva que transforma reconhecimento em investigação, validação e documentação de vulnerabilidades.**
+
+> 🟡🔵 **Agente utilizado no Hackathon BBTS** — edição **FOSC / TS**.
 
 Construído sobre o Claude Code, o FOSC AGENT orquestra ferramentas de reconhecimento e agentes especializados para investigar superfícies de ataque, analisar endpoints e validar possíveis vulnerabilidades.
 
@@ -941,12 +944,12 @@ Consulte o arquivo [LICENSE](LICENSE) para obter os termos completos de utiliza�
 
 <div align="center">
 
-**FOSC AGENT**
+**FOSC / TS**
 
 Ferramenta Ofensiva de Segurança Cibernética
 
 **RECON. HUNT. VALIDATE. LEARN.**
 
-![Red](https://img.shields.io/badge/BUILT%20FOR-SECURITY%20RESEARCH-E53935?style=for-the-badge)
+![Hackathon BBTS](https://img.shields.io/badge/BUILT%20FOR-HACKATHON%20BBTS-FADC00?style=for-the-badge&labelColor=003399)
 
 </div>
