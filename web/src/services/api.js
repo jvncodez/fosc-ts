@@ -249,6 +249,12 @@ const liveApi = {
   },
   async requestApproval() { return this.getWorkspace(); }, // no live, os pedidos nascem do agente
   async getCampaigns() { return jget('/api/campaigns'); },
+  async deleteCampaign(target) {
+    const r = await jpost('/api/campaign/delete', { target: String(target || '').trim() });
+    if (r.error) throw new Error(r.error);
+    if (live.target && live.target === String(target || '').trim()) { live.target = null; live.confirmedIds = null; }
+    return r;
+  },
   async selectCampaign(target) {
     // Só fixa o alvo; quem chama navega para #terminal e o renderRoute
     // já busca o workspace — evita uma requisição /api/workspace redundante.

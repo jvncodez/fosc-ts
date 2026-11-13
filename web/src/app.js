@@ -32,7 +32,8 @@ function fleetCard(c) {
     <div class="finding-metrics"><div><small>Confirmados</small><strong>${c.confirmed || 0}</strong></div>
       <div><small>Alta/Crítica</small><strong>${alta}</strong></div>
       <div><small>Média</small><strong>${sev.medium || 0}</strong></div>
-      <div><small>Custo</small><strong>$${(c.cost || 0).toFixed(2)}</strong></div></div></article>`;
+      <div><small>Custo</small><strong>$${(c.cost || 0).toFixed(2)}</strong></div></div>
+    <div class="fleet-card-actions"><button class="button button-danger-quiet button-small" type="button" data-action="delete-campaign" data-campaign="${esc(c.target)}" title="Apaga a campanha para poder rodar o mesmo alvo de novo">${icon('close')} Apagar campanha</button></div></article>`;
 }
 
 async function fleetView() {
@@ -453,6 +454,13 @@ document.addEventListener('click',async event=>{
   }
   else if(action==='export'){downloadSnapshot();toast('Snapshot JSON exportado.');}
   else if(action==='go-audit'){location.hash='#audit';}
+  else if(action==='delete-campaign'){
+    event.preventDefault();event.stopPropagation();
+    const alvo=target.dataset.campaign;
+    if(!confirm(`Apagar a campanha de ${alvo}?\n\nIsso remove a caçada da fila e todo o estado dela, liberando rodar este alvo de novo. Não dá pra desfazer.`))return;
+    try{await api.deleteCampaign(alvo);content.innerHTML=await fleetView();toast('Campanha apagada. Pode rodar o alvo de novo.');}
+    catch(error){toast(friendlyError(error));}
+  }
   else if(action==='open-campaign'){try{await api.selectCampaign(target.dataset.campaign);}catch(error){toast(friendlyError(error));}location.hash='#terminal';}
   else if(action==='open-finding'){event.preventDefault();await openFindingDrawer(target.dataset.id);}
   else if(action==='copy-curl'){try{await navigator.clipboard.writeText(lastCurl||'');toast('Curl copiado.');}catch{toast('Não foi possível copiar.');}}

@@ -133,6 +133,14 @@ class _Store:
     def get(self, job_id: str) -> dict | None:
         return _row(self._conn().execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone())
 
+    def cancel_target(self, target: str) -> int:
+        """Drop every active (queued/running) job for a target so the same host
+        can be enqueued again. A worker that died leaves a job stuck in RUNNING,
+        which otherwise blocks re-running the campaign forever."""
+        cur = self._conn().execute(
+            "DELETE FROM jobs WHERE target=? AND status IN (?,?)", (target, QUEUED, RUNNING))
+        return cur.rowcount
+
 
 def _row(r) -> dict | None:
     if r is None:

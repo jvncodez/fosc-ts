@@ -172,6 +172,51 @@ def control(p: dict) -> dict:
     return {"ok": True}
 
 
+def delete_run(p: dict) -> dict:
+    """Apaga uma campanha: tira da fila, para o processo vivo e remove o
+    diretório da run. Sem isso, recriar a caçada no mesmo host trava — o job
+    antigo (preso em running quando o worker morre) bloqueia o re-enfileiramento
+    e o diretório antigo mantém o estado velho."""
+    target = config.normalize_target(p.get("target") or "")
+    if not target:
+        return {"ok": False, "error": "alvo obrigatório"}
+    removed = {"queue": 0, "process": False, "dir": False}
+    # 1) libera a fila (desbloqueia rodar o mesmo alvo de novo)
+    if config.QUEUE_ENABLED:
+        try:
+            from . import jobqueue
+            removed["queue"] = jobqueue.get_queue().store.cancel_target(target)
+        except Exception:
+            pass
+    # 2) para o processo vivo, se houver, e remove o diretório
+    if config.run_exists(target):
+        st = RunState(target)
+        for f in (st.halt_path, st.stop_path):
+            try:
+                f.write_text("deleted via viewer\n")
+            except OSError:
+                pass
+        pid = (st.read_meta() or {}).get("pid")
+        if pid:
+            import signal
+            try:                       # start_new_session=True -> pgid == pid
+                os.killpg(int(pid), signal.SIGTERM)
+                removed["process"] = True
+            except (ProcessLookupError, PermissionError, ValueError, OSError):
+                try:
+                    os.kill(int(pid), signal.SIGTERM)
+                    removed["process"] = True
+                except (ProcessLookupError, PermissionError, ValueError):
+                    pass
+        import shutil
+        d = st.dir.resolve()
+        root = config.STATE_ROOT.resolve()
+        if d != root and root in d.parents:
+            shutil.rmtree(d, ignore_errors=True)
+            removed["dir"] = not d.exists()
+    return {"ok": True, "target": target, "removed": removed}
+
+
 def finding_detail(target: str, fid: str) -> dict:
     if not config.run_exists(target):
         return {"ok": False, "error": "alvo desconhecido"}
@@ -463,6 +508,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._json(start_hunt(p))
             if path == "/api/control":
                 return self._json(control(p))
+            if path == "/api/campaign/delete":
+                return self._json(delete_run(p))
             if path == "/api/approval":
                 from . import wsview
                 return self._json(wsview.resolve_approval(
