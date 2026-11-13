@@ -17,6 +17,29 @@ from .authz import ApprovalStore, operator
 from .state import RunState, list_runs
 
 _SEV = {"critical": "critical", "high": "high", "medium": "medium", "low": "low", "info": "low"}
+# Ordem da pipeline de vulns: crítica → alta → média → baixa.
+_SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+_CLASS_RANK = {"confirmed": 0, "inconclusive": 1, "discarded": 2}
+
+
+def _council_severity(f: dict) -> str:
+    """Severidade que vale é a FINAL do Conselho (o parecer das cadeiras manda
+    sobre a sugerida crua do caçador). Cai pra severity do achado só se o
+    Conselho não tiver definido."""
+    c = f.get("council") or {}
+    final = (c.get("severidade_final") or "").strip().lower()
+    if final in _SEV:
+        return _SEV[final]
+    return _SEV.get((f.get("severity") or "low").lower(), "low")
+
+
+def _sev_counts(snap: dict) -> dict:
+    """Contagem de severidade pela decisão FINAL do Conselho (não pela crua do
+    motor), para KPIs e cards baterem com a pipeline de achados."""
+    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for f in snap.get("confirmed") or []:
+        counts[_council_severity(f)] += 1
+    return counts
 _CONF_NUM = {"high": 0.92, "medium": 0.68, "low": 0.4, "alta": 0.92, "media": 0.68, "baixa": 0.4}
 # status da engine -> status do front (draft/running/completed/interrupted)
 _STATUS = {"running": "running", "recon": "running", "sleeping": "running", "paused": "running",
@@ -198,7 +221,7 @@ def _findings(st: RunState | None, snap: dict) -> list[dict]:
     for f in snap.get("confirmed") or st.confirmed():
         out.append({
             "id": f.get("id") or f.get("url"), "title": f.get("title") or f.get("vuln_class") or "Achado",
-            "asset": _asset(f.get("url")), "severity": _SEV.get((f.get("severity") or "low").lower(), "low"),
+            "asset": _asset(f.get("url")), "severity": _council_severity(f),
             "confidence": _conf_num(f), "impact": f.get("impact") or f.get("summary") or "",
             "classification": "confirmed", "evidence": f.get("evidence_marker") or (f.get("summary") or "")[:200],
             "observedAt": _fmt(f.get("ts")), "council": f.get("council"),
@@ -215,6 +238,12 @@ def _findings(st: RunState | None, snap: dict) -> list[dict]:
             "classification": "inconclusive" if v == "inconclusive" else "discarded",
             "evidence": (r.get("summary") or "")[:200], "observedAt": _fmt(r.get("ts")), "council": None,
         })
+    # Pipeline: confirmados primeiro, e dentro de cada estado por severidade
+    # (crítica → alta → média → baixa) e maior confiança — a severidade já é a
+    # final do Conselho para os confirmados.
+    out.sort(key=lambda a: (_CLASS_RANK.get(a["classification"], 9),
+                            _SEV_RANK.get(a["severity"], 9),
+                            -(a.get("confidence") or 0)))
     return out
 
 
@@ -251,9 +280,7 @@ def _hunt(st: RunState, snap: dict) -> dict:
     done = snap.get("done") or 0
     progress = int(done / total * 100) if total else (100 if snap["status"] in ("finished", "done") else 0)
     cost = round(float(m.get("cost_usd") or 0), 4)
-    sev = snap.get("severity") or {}
-    severity = {"critical": sev.get("critical", 0), "high": sev.get("high", 0),
-                "medium": sev.get("medium", 0), "low": (sev.get("low", 0) + sev.get("info", 0))}
+    severity = _sev_counts(snap)
     active = snap.get("active") or {}
     rows = active.values() if isinstance(active, dict) else active
     inflight = [{"url": t.get("url", ""), "phase": t.get("phase") or "hunting",
@@ -362,7 +389,7 @@ def campaigns() -> dict:
         raw = snap["status"]
         out.append({
             "target": st.target, "status": _map_status(raw), "rawStatus": raw,
-            "live": raw in _LIVE, "confirmed": snap["confirmed_count"], "severity": snap["severity"],
+            "live": raw in _LIVE, "confirmed": snap["confirmed_count"], "severity": _sev_counts(snap),
             "cost": round(m.get("cost_usd") or 0, 2), "scopeId": _scope_id(st.target),
             "startedAt": _fmt(m.get("started_at")), "_sort": m.get("started_at") or 0,
         })
