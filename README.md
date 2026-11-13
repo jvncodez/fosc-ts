@@ -663,11 +663,12 @@ http://127.0.0.1:5555
 
 ### Login opcional com Amazon Cognito
 
-O painel continua restrito a `127.0.0.1`. Para exigir login Cognito antes de
-qualquer página, API ou feed SSE, configure um User Pool público e carregue
-`.env.cognito` antes de iniciar o painel. O fluxo usa Authorization Code +
-PKCE e mantém tokens fora do navegador. Siga o procedimento completo em
-[`docs/cognito-local-viewer.md`](docs/cognito-local-viewer.md).
+O viewer serve o frontend em `web/` junto com a API real e continua restrito a
+`127.0.0.1`. Para exigir login antes do dashboard, das APIs e dos eventos SSE,
+configure um User Pool público e carregue `.env.cognito` antes de iniciar o
+viewer. O fluxo usa Authorization Code + PKCE e mantém tokens fora do
+navegador; também funciona através do proxy de portas do Kiro. O procedimento
+completo está em [`docs/cognito-local-viewer.md`](docs/cognito-local-viewer.md).
 
 ### Interface
 

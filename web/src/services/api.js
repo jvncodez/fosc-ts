@@ -173,13 +173,25 @@ export function subscribeToUpdates(url, onUpdate, onError = () => {}) {
  * ========================================================================== */
 const live = { target: null, confirmedIds: null };
 
+function dashboardUrl(path) {
+  return new URL(String(path).replace(/^\/+/, ''), document.baseURI).toString();
+}
+function requireLogin() {
+  window.location.assign(dashboardUrl('auth/login'));
+}
 async function jget(path) {
-  const r = await authenticatedFetch(path, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+  // authenticatedFetch cobre os dois modos: proxy (PKCE + Bearer no API
+  // Gateway) e embutido local (cookie de sessão + /auth/login). Em 401, ela
+  // mesma reinicia o login; aqui só propagamos como AUTH_REQUIRED para o
+  // chamador nunca cair no mock por engano.
+  const r = await authenticatedFetch(dashboardUrl(path), { headers: { Accept: 'application/json' }, cache: 'no-store' });
+  if (r.status === 401) { requireLogin(); throw new Error('AUTH_REQUIRED'); }
   if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status}`), { status: r.status });
   return r.json();
 }
 async function jpost(path, body) {
-  const r = await authenticatedFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-FOSC': '1' }, body: JSON.stringify(body || {}) });
+  const r = await authenticatedFetch(dashboardUrl(path), { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-FOSC': '1' }, body: JSON.stringify(body || {}) });
+  if (r.status === 401) { requireLogin(); throw new Error('AUTH_REQUIRED'); }
   if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status}`), { status: r.status });
   return r.json();
 }
@@ -223,7 +235,7 @@ const liveApi = {
     if (scope) body.scope = String(scope).slice(0, 500);
     const r = await jpost('/api/hunt', body);
     if (r.error) throw new Error(r.error);
-    live.target = r.target || body.target; live.confirmedIds = null;
+    live.target = r.target || body.target; live.confirmedIds = null;  // alvo normalizado pelo backend
     return this.getWorkspace();
   },
   async emergencyStop() {

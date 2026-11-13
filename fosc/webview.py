@@ -60,6 +60,26 @@ TARGET_RX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-:/_]{0,250}$")
 LIVE = ("running", "paused", "sleeping", "recon")
 
 
+def _auth_error_page(message: str, login_url: str) -> bytes:
+    """Small Portuguese error page shown when a Cognito callback is rejected."""
+    safe_url = login_url.replace('"', "%22")
+    return (
+        "<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        "<title>FOSC/TS — Login</title>"
+        "<style>body{margin:0;min-height:100vh;display:grid;place-items:center;"
+        "font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f4f7fc;color:#1d2940}"
+        ".card{background:#fff;border:1px solid #e3e9f2;border-radius:12px;padding:28px 32px;"
+        "max-width:380px;text-align:center;box-shadow:0 14px 38px #1725411a}"
+        "h1{font-size:18px;margin:0 0 8px}p{font-size:13px;color:#59667d;margin:0 0 18px}"
+        "a{display:inline-block;background:#1f6fb5;color:#fff;text-decoration:none;"
+        "font-size:13px;font-weight:700;padding:10px 18px;border-radius:7px}</style></head>"
+        f"<body><div class=\"card\"><h1>{message}</h1>"
+        "<p>Volte para a página de login e tente novamente.</p>"
+        f"<a href=\"{safe_url}\">Voltar para o login</a></div></body></html>"
+    ).encode("utf-8")
+
+
 def overview() -> dict:
     targets, tot_conf, tot_cost = [], 0, 0.0
     for st in list_runs():
@@ -266,7 +286,7 @@ def _proxy_oauth_config() -> dict[str, object]:
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "FOSC-TS-Viewer"
     port = 5555
-    # Set only by run_viewer after the configuration has passed fail-closed checks.
+    # Initialized only after Cognito configuration succeeds, before the port binds.
     auth: CognitoAuth | None = None
 
     # Public OAuth metadata is exposed only to bootstrap the browser PKCE flow.
@@ -281,17 +301,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if config.PUBLIC_ORIGIN:            # atrás de API Gateway + Cognito
             return True                     # roteamento e autenticação são do proxy
         host = (self.headers.get("Host") or "").lower()
-        return host in (f"127.0.0.1:{self.port}", f"localhost:{self.port}")
+        allowed = {f"127.0.0.1:{self.port}", f"localhost:{self.port}"}
+        if self.auth:
+            allowed.add(urlparse(self.auth.settings.public_url).netloc.lower())
+        return host in allowed
 
     def _post_ok(self) -> bool:
         if self.headers.get("X-FOSC") != "1":
             return False
         origin = self.headers.get("Origin")
-        if config.PUBLIC_ORIGIN:            # CSRF: só o domínio público autenticado
+        if config.PUBLIC_ORIGIN:            # CSRF: só o domínio público autenticado (API Gateway)
             return origin == config.PUBLIC_ORIGIN
-        # Cookies make an Origin check essential. The browser client uses this
-        # canonical loopback origin after Cognito redirects back from login.
-        return origin == f"http://127.0.0.1:{self.port}"
+        if self.auth:
+            # Cookies make an Origin check essential. The browser client uses
+            # this canonical origin after Cognito redirects back from login.
+            return origin == self.auth.settings.public_origin
+        return origin in (None, f"http://127.0.0.1:{self.port}", f"http://localhost:{self.port}")
 
     def _session(self):
         if config.PUBLIC_ORIGIN:
@@ -312,7 +337,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path.startswith("/api/"):
             self._json({"ok": False, "error": "authentication required"}, 401)
         else:
-            self._redirect("/auth/login")
+            self._redirect(f"{self.auth.settings.public_url}/auth/login")
         return True
 
     # -- responses -------------------------------------------------------
@@ -338,16 +363,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(json.dumps(obj).encode(), "application/json; charset=utf-8", status)
 
     def _redirect(self, location: str, cookies: list[str] | None = None):
-        self._send(b"", "text/plain; charset=utf-8", 302, [("Location", location)] + [("Set-Cookie", cookie) for cookie in (cookies or [])])
+        self._send(b"", "text/plain; charset=utf-8", 302,
+                   [("Location", location)] + [("Set-Cookie", cookie) for cookie in (cookies or [])])
 
     def _auth_callback(self, query: dict[str, str]):
+        login_url = f"{self.auth.settings.public_url}/auth/login"
         if query.get("error"):
-            return self._send(b"Login cancelled or failed. Return to the login page and try again.", "text/plain; charset=utf-8", 400)
+            return self._send(_auth_error_page("Login cancelado ou não concluído.", login_url),
+                              "text/html; charset=utf-8", 400)
         identity, cookies = self.auth.complete(self.headers, query)
         if not identity:
-            return self._send(b"Login verification failed. Return to the login page and try again.", "text/plain; charset=utf-8", 400,
+            return self._send(_auth_error_page("Não foi possível verificar o login.", login_url),
+                              "text/html; charset=utf-8", 400,
                               [("Set-Cookie", cookie) for cookie in cookies])
-        return self._redirect("/", cookies)
+        return self._redirect(f"{self.auth.settings.public_url}/", cookies)
 
     def do_GET(self):
         if not self._host_ok():
@@ -362,7 +391,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(self.oauth_config)
 
         # These routes are the only unauthenticated surface when embedded
-        # Cognito auth is enabled for the local loopback viewer.
+        # Cognito auth is enabled for the local loopback/proxy viewer.
         if self.auth and u.path == "/auth/login":
             location, cookie = self.auth.begin()
             return self._redirect(location, [cookie])
@@ -379,7 +408,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = (WEB_DIR / name).read_bytes() if name else b"/* live: sem mock */\n"
             return self._send(body, ctype)
         if u.path == "/api/session":
-            return self._json({"ok": True, "user": self._session()})
+            return self._json({"ok": True, "enabled": bool(self.auth), "user": self._session()})
         if u.path == "/api/overview":
             return self._json(overview())
         if u.path == "/api/workspace":
@@ -485,6 +514,7 @@ def run_viewer(port: int, preselect_target: str | None = None):
     # Validate before binding so a partially configured login cannot expose the
     # panel with its protection silently disabled.
     Handler.port = port
+    settings = None
     if config.PUBLIC_ORIGIN:
         # Atrás de proxy autenticado: o browser faz Authorization Code + PKCE e
         # o JWT authorizer do API Gateway valida o access token. Validar os
@@ -507,8 +537,9 @@ def run_viewer(port: int, preselect_target: str | None = None):
               f"(API Gateway + Cognito · SG restringe ingress ao ALB)")
     else:
         url = f"http://127.0.0.1:{port}/" + (f"#/t/{preselect_target}" if preselect_target else "")
-        auth_note = " · Cognito login required" if Handler.auth else " · Cognito disabled"
-        print(f"[fosc] viewer: {url}  (127.0.0.1 only{auth_note}; Ctrl+C para fechar; caçadas continuam rodando)")
+        auth_note = " · Cognito login required" if settings else " · Cognito disabled"
+        location = settings.public_url if settings else url
+        print(f"[fosc] viewer: {location}/  (127.0.0.1 only{auth_note}; Ctrl+C para fechar; caçadas continuam rodando)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

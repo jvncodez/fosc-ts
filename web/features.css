@@ -10,8 +10,8 @@ body { background: var(--background-default) !important; color: var(--text-defau
 .page-heading p { color: var(--text-muted); font-size: 14px; line-height: 20px; }
 .eyebrow,.nav-label { color: var(--text-primary); font-size: 12px; line-height: 16px; letter-spacing: .15px; }
 .panel-title { color: var(--text-default); font: 700 20px/24px var(--font-titles) !important; }
-.panel-subtitle,.workspace-select small,.profile small,.sidebar-callout p { color: var(--text-muted); font-size: 12px; line-height: 16px; }
-.workspace-select strong,.profile strong { color: var(--text-default); font-size: 14px; }
+.panel-subtitle,.workspace-select small,.profile-summary small,.sidebar-callout p { color: var(--text-muted); font-size: 12px; line-height: 16px; }
+.workspace-select strong,.profile-summary strong { color: var(--text-default); font-size: 14px; }
 .breadcrumbs,.environment,.nav-item,.sidebar-callout,.profile { color: var(--text-muted); }
 .nav-item { font-size: 14px; line-height: 16px; }
 .nav-item:hover { background: var(--container-neutral-hover); color: var(--text-default); }

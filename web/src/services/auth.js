@@ -4,6 +4,29 @@ const CLOCK_SKEW_SECONDS = 30;
 let configPromise;
 let bootstrapPromise;
 
+// Dois modos de autenticação, ambos já implementados no backend (fosc/webview.py):
+//  - 'proxy'    : atrás de API Gateway + Cognito (SENTINELA_PUBLIC_ORIGIN). O
+//                 browser faz Authorization Code + PKCE direto com o Cognito e
+//                 envia o access token em Authorization: Bearer. Esta é a
+//                 implementação PKCE original deste arquivo; preservada abaixo.
+//  - 'embedded' : viewer local (fosc -v), sem SENTINELA_PUBLIC_ORIGIN. O backend
+//                 já faz PKCE, troca de código e verificação do id_token no
+//                 servidor; o browser só segue redirects e usa o cookie HttpOnly
+//                 de sessão (nenhum token toca o JavaScript).
+// O modo é detectado automaticamente: se /auth/config responder, é 'proxy';
+// se vier 404 (rota só existe quando SENTINELA_PUBLIC_ORIGIN está definido),
+// é 'embedded'.
+let authModePromise;
+
+async function detectAuthMode() {
+  if (!authModePromise) {
+    authModePromise = fetch('/auth/config', { headers: { Accept: 'application/json' }, cache: 'no-store' })
+      .then(response => (response.ok ? 'proxy' : 'embedded'))
+      .catch(() => 'embedded');
+  }
+  return authModePromise;
+}
+
 function base64Url(bytes) {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -167,7 +190,26 @@ export async function getAccessToken() {
   finally { bootstrapPromise = null; }
 }
 
+// Modo 'embedded': a sessão é um cookie HttpOnly já enviado pelo navegador em
+// toda requisição same-origin (fetch() faz isso por padrão, sem precisar de
+// 'credentials: include'). Nenhum token é lido, gerado ou guardado aqui — o
+// backend (CognitoAuth em fosc/cognito_auth.py) já fez PKCE e validou o
+// id_token no servidor antes de emitir esse cookie.
+async function embeddedFetch(input, options = {}) {
+  const response = await fetch(input, options);
+  if (response.status === 401) {
+    // Sessão ausente/expirada: só o servidor sabe recomeçar o login (ele cria
+    // a transação PKCE); o browser apenas segue o redirect.
+    location.assign('/auth/login');
+    return new Promise(() => {}); // a navegação em curso torna o valor de retorno irrelevante
+  }
+  return response;
+}
+
 export async function authenticatedFetch(input, options = {}) {
+  const mode = await detectAuthMode();
+  if (mode === 'embedded') return embeddedFetch(input, options);
+
   const token = await getAccessToken();
   const headers = new Headers(options.headers || {});
   headers.set('Authorization', `Bearer ${token}`);
@@ -180,6 +222,11 @@ export async function authenticatedFetch(input, options = {}) {
 }
 
 export async function logout() {
+  const mode = await detectAuthMode();
+  if (mode === 'embedded') {
+    location.assign('/auth/logout');
+    return;
+  }
   sessionStorage.removeItem(OAUTH_TOKEN_KEY);
   sessionStorage.removeItem(OAUTH_TRANSACTION_KEY);
   const config = await getOAuthConfig();
