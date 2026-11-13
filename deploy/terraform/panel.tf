@@ -31,6 +31,25 @@ resource "aws_vpc_security_group_ingress_rule" "panel_from_vpc" {
   cidr_ipv4         = data.aws_vpc.selected.cidr_block
 }
 
+# painel -> resolver DNS da VPC (mesma lacuna do SG do worker, ver network.tf).
+resource "aws_vpc_security_group_egress_rule" "panel_dns_udp" {
+  security_group_id = aws_security_group.panel.id
+  description       = "DNS (UDP) to the VPC resolver"
+  ip_protocol       = "udp"
+  from_port         = 53
+  to_port           = 53
+  cidr_ipv4         = data.aws_vpc.selected.cidr_block
+}
+
+resource "aws_vpc_security_group_egress_rule" "panel_dns_tcp" {
+  security_group_id = aws_security_group.panel.id
+  description       = "DNS (TCP fallback) to the VPC resolver"
+  ip_protocol       = "tcp"
+  from_port         = 53
+  to_port           = 53
+  cidr_ipv4         = data.aws_vpc.selected.cidr_block
+}
+
 resource "aws_vpc_security_group_egress_rule" "panel_to_efs" {
   security_group_id            = aws_security_group.panel.id
   description                  = "NFS ao EFS (estado compartilhado com o worker)"
