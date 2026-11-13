@@ -18,6 +18,18 @@ const S = {
 };
 
 // ---------------------------------------------------------------- utils
+async function redirectIfSignedOut() {
+  if (window.FOSC_MOCK) return false;
+  try {
+    const r = await fetch("/api/session", { cache: "no-store" });
+    if (r.status === 401) {
+      window.location.assign("/auth/login");
+      return true;
+    }
+  } catch { /* Preserve the page during a transient local connection failure. */ }
+  return false;
+}
+
 async function api(path, body) {
   if (window.FOSC_MOCK) return window.FOSC_MOCK.api(path, body);
   const opts = body === undefined ? {} : {
@@ -25,6 +37,10 @@ async function api(path, body) {
     headers: { "Content-Type": "application/json", "X-FOSC": "1" },
   };
   const r = await fetch(path, opts);
+  if (r.status === 401) {
+    window.location.assign("/auth/login");
+    return { ok: false, error: "authentication required" };
+  }
   let data = {};
   try { data = await r.json(); } catch { /* ignore */ }
   if (!r.ok && data.ok === undefined) data.ok = false;
@@ -242,6 +258,9 @@ function connect() {
     S.snap = snap;
     renderHunt();
   });
+  // EventSource hides the HTTP status. Confirm a session before redirecting so
+  // a temporary local network error does not log the operator out.
+  es.onerror = () => { redirectIfSignedOut(); };
   S.es = es;
 }
 

@@ -417,6 +417,9 @@ Prior pass results to build on:
         head = """Start by running `id` and `uname -a` through the channel to learn who you are
 and the kernel, then enumerate (identity/sudo/SUID/caps/cron, container status, and
 any service running as root) before you exploit, per your instructions."""
+    looted_note = (
+        "Credentials/secrets already looted during web hunting (try reuse — these are REAL values, use them):\n" + looted
+    ) if looted else ""
     return f"""Scope: {scope_note}
 Host target: {target}
 
@@ -429,7 +432,7 @@ Command-execution channel (replace __CMD__ with the OS command to run):
   {exec_howto}
 
 {head}
-{('Credentials/secrets already looted during web hunting (try reuse — these are REAL values, use them):\n' + looted) if looted else ''}
+{looted_note}
 """
 
 

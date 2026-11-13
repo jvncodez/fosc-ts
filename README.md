@@ -661,6 +661,14 @@ Acesse:
 http://127.0.0.1:5555
 ```
 
+### Login opcional com Amazon Cognito
+
+O painel continua restrito a `127.0.0.1`. Para exigir login Cognito antes de
+qualquer página, API ou feed SSE, configure um User Pool público e carregue
+`.env.cognito` antes de iniciar o painel. O fluxo usa Authorization Code +
+PKCE e mantém tokens fora do navegador. Siga o procedimento completo em
+[`docs/cognito-local-viewer.md`](docs/cognito-local-viewer.md).
+
 ### Interface
 
 O painel apresenta uma interface dark com identidade visual vermelha, organizada para facilitar o monitoramento das operações.

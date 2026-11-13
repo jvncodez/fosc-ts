@@ -1,4 +1,8 @@
 # FOSC shells out to subfinder, httpx, katana and the claude CLI (all
-# expected on PATH). The only third-party Python dependency is for the
-# `fosc watch` live terminal dashboard.
+# Python dependencies: `rich` renders the live terminal dashboard; PyJWT
+# validates Cognito User Pool tokens when the optional local viewer login is on.
 rich
+
+# Validates Cognito User Pool ID tokens against the pool JWKS when the optional
+# local viewer login is enabled. `crypto` provides the RS256 verifier.
+PyJWT[crypto]
