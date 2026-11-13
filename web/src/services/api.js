@@ -1,3 +1,5 @@
+import { authenticatedFetch } from './auth.js';
+
 /**
  * Camada de integração da FOSC/TS. O estado local é demonstrativo.
  * Nenhum endpoint ou contrato definitivo do backend está presumido.
@@ -152,8 +154,8 @@ const mockApi = {
 // REST e SSE genéricos; nenhum endpoint é definido antes do contrato do backend.
 export async function request(path, options = {}) {
   if (!API_BASE_URL) throw new Error('URL da API ainda não configurada.');
-  const response = await fetch(`${API_BASE_URL}${path}`, { headers: { 'Content-Type': 'application/json', ...options.headers }, ...options });
-  if (!response.ok) throw new Error(`Falha ao consultar serviço (${response.status}).`);
+  const response = await authenticatedFetch(`${API_BASE_URL}${path}`, { headers: { 'Content-Type': 'application/json', ...options.headers }, ...options });
+  if (!response.ok) throw Object.assign(new Error(`Falha ao consultar serviço (${response.status}).`), { status: response.status });
   return response.json();
 }
 export function subscribeToUpdates(url, onUpdate, onError = () => {}) {
@@ -172,13 +174,13 @@ export function subscribeToUpdates(url, onUpdate, onError = () => {}) {
 const live = { target: null, confirmedIds: null };
 
 async function jget(path) {
-  const r = await fetch(path, { headers: { Accept: 'application/json' } });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const r = await authenticatedFetch(path, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+  if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status}`), { status: r.status });
   return r.json();
 }
 async function jpost(path, body) {
-  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-FOSC': '1' }, body: JSON.stringify(body || {}) });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const r = await authenticatedFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-FOSC': '1' }, body: JSON.stringify(body || {}) });
+  if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status}`), { status: r.status });
   return r.json();
 }
 
@@ -203,12 +205,10 @@ function noteFindings(ws) {
 
 const liveApi = {
   async getWorkspace() {
-    try {
-      const ws = await jget(`/api/workspace${live.target ? `?target=${encodeURIComponent(live.target)}` : ''}`);
-      live.target = ws.campaign?.target || live.target;
-      noteFindings(ws);
-      return ws;
-    } catch { return mockApi.getWorkspace(); }
+    const ws = await jget(`/api/workspace${live.target ? `?target=${encodeURIComponent(live.target)}` : ''}`);
+    live.target = ws.campaign?.target || live.target;
+    noteFindings(ws);
+    return ws;
   },
   async advanceCampaign() { return this.getWorkspace(); }, // o motor avança sozinho; aqui só re-busca (+toast)
   async updateTarget(target) {
@@ -221,16 +221,14 @@ const liveApi = {
     const body = { target: String(target || '').trim() };
     if (workers) body.workers = Math.max(1, Math.min(10, Number(workers) || 6));
     if (scope) body.scope = String(scope).slice(0, 500);
-    try {
-      const r = await jpost('/api/hunt', body);
-      if (r.error) throw new Error(r.error);
-      live.target = r.target || body.target; live.confirmedIds = null;  // alvo normalizado pelo backend
-      return this.getWorkspace();
-    } catch (e) { if (/^HTTP /.test(e.message)) return mockApi.startCampaign({ target, authorized }); throw e; }
+    const r = await jpost('/api/hunt', body);
+    if (r.error) throw new Error(r.error);
+    live.target = r.target || body.target; live.confirmedIds = null;
+    return this.getWorkspace();
   },
   async emergencyStop() {
-    try { await jpost('/api/halt', { target: live.target }); return this.getWorkspace(); }
-    catch { return mockApi.emergencyStop(); }
+    await jpost('/api/halt', { target: live.target });
+    return this.getWorkspace();
   },
   async resolveApproval(id, decision) {
     const r = await jpost('/api/approval', { target: live.target, id, decision });
@@ -238,9 +236,7 @@ const liveApi = {
     return this.getWorkspace();
   },
   async requestApproval() { return this.getWorkspace(); }, // no live, os pedidos nascem do agente
-  async getCampaigns() {
-    try { return await jget('/api/campaigns'); } catch { return { campaigns: [], totals: {} }; }
-  },
+  async getCampaigns() { return jget('/api/campaigns'); },
   async selectCampaign(target) {
     // Só fixa o alvo; quem chama navega para #terminal e o renderRoute
     // já busca o workspace — evita uma requisição /api/workspace redundante.

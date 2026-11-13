@@ -118,6 +118,31 @@ variable "telegram_chat_id" {
   sensitive   = true
 }
 
+# --- Painel (Fase 1: Cognito standalone + API Gateway + VPC Link + ALB) --------
+variable "panel_port" {
+  description = "Porta do viewer (fosc -v -p). Container e target group do NLB."
+  type        = number
+  default     = 5555
+}
+
+variable "panel_cpu" {
+  description = "CPU da task Fargate do painel (unidades)."
+  type        = string
+  default     = "512"
+}
+
+variable "panel_memory" {
+  description = "Memória da task Fargate do painel (MiB)."
+  type        = string
+  default     = "1024"
+}
+
+variable "panel_desired_count" {
+  description = "Réplicas do serviço do painel. 1 = sempre disponível (diferente do worker, que fica em 0 por padrão)."
+  type        = number
+  default     = 1
+}
+
 variable "tags" {
   description = "Tags aplicadas a todos os recursos."
   type        = map(string)

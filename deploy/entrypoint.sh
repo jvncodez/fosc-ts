@@ -12,11 +12,9 @@ mkdir -p "$SENTINELA_HOME"                      # volume EFS persistente
 if [ "${SENTINELA_PROVIDER:-bedrock}" = "bedrock" ]; then
   : "${AWS_REGION:?AWS_REGION é obrigatório para o Bedrock}"
 fi
-: "${TARGET:?TARGET (URL do escopo autorizado) é obrigatório}"
 
 echo "BB-Sentinela :: provider=${SENTINELA_PROVIDER:-bedrock} region=${AWS_REGION:-n/a} home=${SENTINELA_HOME}"
 echo "BB-Sentinela :: scope-proxy=${SENTINELA_SCOPE_PROXY:-1} authz=${SENTINELA_AUTHZ:-ask}"
-echo "BB-Sentinela :: alvo autorizado = ${TARGET}"
 
 # Guard-rail de produção: autorização headless NÃO pode ser 'yolo'.
 if [ "${SENTINELA_AUTHZ:-ask}" = "yolo" ]; then
@@ -30,6 +28,20 @@ if [ -n "${TELEGRAM_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
 else
   echo "BB-Sentinela :: Telegram não configurado — aprovar via 'fosc --approve' (painel/CLI)"
 fi
+
+# Dois papéis compartilham a mesma imagem (ver deploy/terraform/{ecs,panel}.tf):
+#   - worker da fila/campanha avulsa: nenhum `command` na task -> cai no
+#     default abaixo, que exige TARGET e dispara a caçada headless (-h -a).
+#   - painel web: a task definition do painel passa um `command` explícito
+#     (`python3 -m fosc.cli -v -p <porta>`), que o ECS entrega aqui como "$@".
+#     Esse caso NUNCA deve exigir TARGET nem abrir uma caçada.
+if [ "$#" -gt 0 ]; then
+  echo "BB-Sentinela :: command explícito recebido — delegando: $*"
+  exec "$@"
+fi
+
+: "${TARGET:?TARGET (URL do escopo autorizado) é obrigatório quando nenhum command é passado}"
+echo "BB-Sentinela :: alvo autorizado = ${TARGET}"
 
 # FOSC_ARGS permite flags extras (ex.: --continuous --interval 3600 --max-items 20).
 exec python3 -m fosc.cli -h -a "$TARGET" ${FOSC_ARGS:-}

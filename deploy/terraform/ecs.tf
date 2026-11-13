@@ -57,8 +57,8 @@ resource "aws_ecs_task_definition" "sentinela" {
         { name = "AWS_REGION", value = local.region },
         { name = "SENTINELA_HOME", value = "/data" },
         { name = "SENTINELA_PROVIDER", value = "bedrock" },
-        { name = "SENTINELA_AUTHZ", value = "ask" },        # headless recusa yolo
-        { name = "SENTINELA_SCOPE_PROXY", value = "1" },    # escopo na rede
+        { name = "SENTINELA_AUTHZ", value = "ask" },     # headless recusa yolo
+        { name = "SENTINELA_SCOPE_PROXY", value = "1" }, # escopo na rede
         { name = "CLAUDE_CODE_USE_BEDROCK", value = "1" },
         { name = "BEDROCK_SONNET", value = var.bedrock_sonnet },
         { name = "BEDROCK_OPUS", value = var.bedrock_opus },

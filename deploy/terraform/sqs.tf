@@ -14,7 +14,7 @@ resource "aws_sqs_queue" "hunts" {
   content_based_deduplication = false # dedup explícita por MessageDeduplicationId no código
   deduplication_scope         = "messageGroup"
   fifo_throughput_limit       = "perMessageGroupId"
-  visibility_timeout_seconds  = 3600 # = SENTINELA_SQS_VISIBILITY (uma caçada é longa)
+  visibility_timeout_seconds  = 3600   # = SENTINELA_SQS_VISIBILITY (uma caçada é longa)
   message_retention_seconds   = 345600 # 4 dias
   receive_wait_time_seconds   = 10     # long-poll
 

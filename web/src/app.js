@@ -1,4 +1,4 @@
-import { api } from './services/api.js';
+import { api, DATA_MODE } from './services/api.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -229,15 +229,27 @@ async function renderRoute() {
     const fc=$('#findings-count');
     if(fc){fc.textContent=confirmed;fc.hidden=!confirmed;}
   } catch(error) {
-    content.innerHTML=`${heading('Dados indisponíveis','Não foi possível carregar os dados do motor.')}<section class="panel empty-state">${icon('info')}<strong>Falha ao carregar os dados</strong><p>${esc(error.message)}</p><button class="button" data-action="retry">Tentar novamente</button></section>`;
+    content.innerHTML=`${heading('Dados indisponíveis','Não foi possível carregar os dados do motor.')}<section class="panel empty-state">${icon('info')}<strong>Falha ao carregar os dados</strong><p>${esc(friendlyError(error))}</p><button class="button" data-action="retry">Tentar novamente</button></section>`;
   }
 }
 
 function toast(message) { const el=document.createElement('div');el.className='toast';el.innerHTML=`${icon('check')}${esc(message)}`;$('#toast-region').append(el);setTimeout(()=>el.remove(),3800); }
+// Traduz mensagens técnicas (ex.: "HTTP 404") para algo compreensível, só na
+// apresentação. Não altera o formato do erro na camada de API (api.js/auth.js).
+function friendlyError(error) {
+  const message = error?.message || '';
+  if (typeof error?.status === 'number' || /HTTP \d+/.test(message)) {
+    return 'Não foi possível concluir a ação agora. Tente novamente em instantes.';
+  }
+  return message || 'Ocorreu um erro inesperado.';
+}
 function downloadSnapshot() {
   const route=location.hash.replace(/^#\/?/,'')||'campaign';
   const collections={findings:workspace.findings,audit:workspace.audit,terminal:workspace.commands,reports:{campaign:workspace.campaign,findings:workspace.findings,approvals:workspace.approvals,policies:workspace.policies}};
-  const data={simulated:true,exportedAt:new Date().toISOString(),section:route,data:collections[route]??workspace};
+  // simulated=false só quando os dados em tela vieram de fato do liveApi (DATA_MODE
+  // 'live' e a tela chegou a renderizar, isto é, nenhuma chamada caiu no catch de
+  // renderRoute). Sem essa segunda condição, não há garantia de origem real.
+  const data={simulated:!(DATA_MODE==='live'&&workspace),exportedAt:new Date().toISOString(),section:route,data:collections[route]??workspace};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);const link=document.createElement('a');
   link.href=url;link.download=`fosc-ts-${route}-demo.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -325,7 +337,11 @@ async function openFindingDrawer(id){
   layer.setAttribute('aria-hidden','false');
   const res=await api.getFinding(id);
   const body=$('.finding-modal-body'); const head=$('.finding-modal .modal-head');
-  if(!res||!res.ok){ if(body)body.innerHTML=`<p>${esc((res&&res.error)||'Não foi possível carregar o achado.')}</p>`; return; }
+  if(!res||!res.ok){
+    if(head)head.innerHTML=`<div><div class="eyebrow">${esc(id)}</div><h2>Não foi possível carregar</h2></div><button class="modal-close" data-action="close-modal" aria-label="Fechar">${icon('close')}</button>`;
+    if(body)body.innerHTML=`<p>${esc((res&&res.error)||'Não foi possível carregar o achado.')}</p>`;
+    return;
+  }
   const f=res.finding||{}; lastCurl=f.repro_curl||'';
   const sev=String(f.severity||'info').toLowerCase();
   const council=f.council||{};
@@ -339,7 +355,7 @@ async function openFindingDrawer(id){
 async function updateAndRender(message, route=location.hash.replace(/^#/, '')||'campaign') {
   closeModal();
   try { workspace=await api.getWorkspace(); location.hash=`#${route}`; if(location.hash===`#${route}`) { await renderRoute(); } if(message)toast(message); }
-  catch(error){toast(error.message);}
+  catch(error){toast(friendlyError(error));}
 }
 
 document.addEventListener('click',async event=>{
@@ -360,17 +376,17 @@ document.addEventListener('click',async event=>{
     if(!targetField?.reportValidity())return;
     const targetValue=targetField.value.trim();
     if(!targetValue)return;
-    try{await api.updateTarget(targetValue);await updateAndRender('Alvo salvo no escopo.','campaign');}catch(error){toast(error.message);}
+    try{await api.updateTarget(targetValue);await updateAndRender('Alvo salvo no escopo.','campaign');}catch(error){toast(friendlyError(error));}
   }
   else if(action==='resolve-approval'){
-    try{await api.resolveApproval(target.dataset.id,target.dataset.decision);await updateAndRender(target.dataset.decision==='approved'?'Decisão aprovada e registrada.':'Solicitação recusada e bloqueada.',location.hash==='#terminal'?'terminal':'approvals');}catch(error){toast(error.message);}
+    try{await api.resolveApproval(target.dataset.id,target.dataset.decision);await updateAndRender(target.dataset.decision==='approved'?'Decisão aprovada e registrada.':'Solicitação recusada e bloqueada.',location.hash==='#terminal'?'terminal':'approvals');}catch(error){toast(friendlyError(error));}
   }
   else if(action==='request-approval'){
-    try{await api.requestApproval(target.dataset.id);await updateAndRender('Solicitação enviada para aprovação humana.','approvals');}catch(error){toast(error.message);}
+    try{await api.requestApproval(target.dataset.id);await updateAndRender('Solicitação enviada para aprovação humana.','approvals');}catch(error){toast(friendlyError(error));}
   }
   else if(action==='export'){downloadSnapshot();toast('Snapshot JSON exportado.');}
   else if(action==='go-audit'){location.hash='#audit';}
-  else if(action==='open-campaign'){try{await api.selectCampaign(target.dataset.campaign);}catch(error){toast(error.message);}location.hash='#terminal';}
+  else if(action==='open-campaign'){try{await api.selectCampaign(target.dataset.campaign);}catch(error){toast(friendlyError(error));}location.hash='#terminal';}
   else if(action==='open-finding'){event.preventDefault();await openFindingDrawer(target.dataset.id);}
   else if(action==='copy-curl'){try{await navigator.clipboard.writeText(lastCurl||'');toast('Curl copiado.');}catch{toast('Não foi possível copiar.');}}
   else if(action==='retry')await renderRoute();
@@ -385,7 +401,7 @@ document.addEventListener('submit',async event=>{
   try{
     workspace=await api.startCampaign({target:String(form.get('target')).trim(),authorized:!!form.get('authorized'),workers:Number(form.get('workers'))||6,scope:String(form.get('scope')||'').trim()});
     await renderRoute();toast('Campanha iniciada.');
-  }catch(error){toast(error.message);}
+  }catch(error){toast(friendlyError(error));}
 });
 document.addEventListener('keydown',event=>{if(event.key==='Escape')closeModal();});
 window.addEventListener('hashchange',renderRoute);

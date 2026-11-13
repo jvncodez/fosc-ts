@@ -9,7 +9,8 @@
 # rede (security group / NACL) aos IPs do alvo. Ver .kiro/steering/deploy.md.
 
 # --- estágio 1: ferramentas em Go ---
-FROM golang:1.23-bookworm AS gotools
+# 1.27: subfinder recente passou a exigir go >= 1.26 (go.mod da dependência).
+FROM golang:1.27-bookworm AS gotools
 ENV GOBIN=/out
 RUN mkdir -p /out && \
     go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest && \
@@ -29,10 +30,17 @@ RUN mkdir -p /out && \
 FROM node:22-bookworm-slim
 
 # Arsenal via apt: portas/serviços, scanners, exploração, fingerprint, utilitários.
+# nikto não está no componente "main" do Bookworm (é non-free) — instalado via
+# git clone do próprio projeto (script Perl) em vez de habilitar outro repo apt.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 python3-pip pipx ca-certificates git curl wget jq openssl \
-      nmap masscan nikto whatweb sqlmap wafw00f dnsutils \
+      python3 python3-pip pipx ca-certificates git curl wget jq openssl unzip \
+      nmap masscan whatweb sqlmap wafw00f dnsutils perl \
+      libnet-ssleay-perl libwhisker2-perl libjson-pp-perl \
  && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto \
+ && printf '#!/usr/bin/env bash\nexec perl /opt/nikto/program/nikto.pl "$@"\n' > /usr/local/bin/nikto \
+ && chmod +x /usr/local/bin/nikto
 
 # Claude Code CLI (o agente shell-out). Bedrock é ligado por env, não aqui.
 RUN npm install -g @anthropic-ai/claude-code
@@ -56,6 +64,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 COPY fosc ./fosc
+COPY web ./web
 COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 # `fosc` no PATH para operar o container (fosc --audit / --approve / --halt / --status)

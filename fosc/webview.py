@@ -41,7 +41,8 @@ if (_FRONT / "src" / "app.js").is_file():
               "/terminal.css": ("terminal.css", _CSS),
               "/assets/fosc-ts.svg": ("assets/fosc-ts.svg", "image/svg+xml"),
               "/src/app.js": ("src/app.js", _JS),
-              "/src/services/api.js": ("src/services/api.js", _JS)}
+              "/src/services/api.js": ("src/services/api.js", _JS),
+              "/src/services/auth.js": ("src/services/auth.js", _JS)}
 elif (_FRONT / "index.html").is_file():
     WEB_DIR = _FRONT
     STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
@@ -224,31 +225,88 @@ def set_config(p: dict) -> dict:
     return {"ok": True, **get_config()}
 
 
+def _proxy_oauth_config() -> dict[str, object]:
+    """Validate public Cognito metadata before exposing the proxy-mode panel."""
+    if not config.PUBLIC_ORIGIN:
+        return {}
+    domain = os.environ.get("SENTINELA_COGNITO_DOMAIN", "").strip().rstrip("/")
+    user_pool_id = os.environ.get("SENTINELA_COGNITO_USER_POOL_ID", "").strip()
+    client_id = os.environ.get("SENTINELA_COGNITO_CLIENT_ID", "").strip()
+    redirect_uri = os.environ.get("SENTINELA_COGNITO_REDIRECT_URI", "").strip()
+    scopes = tuple(dict.fromkeys(os.environ.get("SENTINELA_COGNITO_SCOPES", "openid profile email").split()))
+    missing = [name for name, value in {
+        "SENTINELA_COGNITO_DOMAIN": domain,
+        "SENTINELA_COGNITO_USER_POOL_ID": user_pool_id,
+        "SENTINELA_COGNITO_CLIENT_ID": client_id,
+        "SENTINELA_COGNITO_REDIRECT_URI": redirect_uri,
+    }.items() if not value]
+    if missing:
+        raise ValueError("proxy Cognito configuration missing: " + ", ".join(missing))
+    parsed = urlparse(domain)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+        raise ValueError("SENTINELA_COGNITO_DOMAIN must be an HTTPS origin without path/query/fragment")
+    expected_redirect = f"{config.PUBLIC_ORIGIN}/"
+    if redirect_uri != expected_redirect:
+        raise ValueError(f"SENTINELA_COGNITO_REDIRECT_URI must be exactly {expected_redirect}")
+    if "openid" not in scopes:
+        raise ValueError("SENTINELA_COGNITO_SCOPES must include openid")
+    region = user_pool_id.split("_", 1)[0] if "_" in user_pool_id else ""
+    if not region:
+        raise ValueError("SENTINELA_COGNITO_USER_POOL_ID must be a Cognito User Pool ID")
+    return {
+        "enabled": True,
+        "domain": domain,
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "issuer": f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}",
+        "scopes": list(scopes),
+    }
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "FOSC-TS-Viewer"
     port = 5555
     # Set only by run_viewer after the configuration has passed fail-closed checks.
     auth: CognitoAuth | None = None
 
+    # Public OAuth metadata is exposed only to bootstrap the browser PKCE flow.
+    # These values are identifiers/endpoints, never credentials or tokens.
+    oauth_config: dict[str, object] = {}
+
     def log_message(self, fmt, *args):
         pass
 
     # -- guards ----------------------------------------------------------
     def _host_ok(self) -> bool:
+        if config.PUBLIC_ORIGIN:            # atrás de API Gateway + Cognito
+            return True                     # roteamento e autenticação são do proxy
         host = (self.headers.get("Host") or "").lower()
         return host in (f"127.0.0.1:{self.port}", f"localhost:{self.port}")
 
     def _post_ok(self) -> bool:
         if self.headers.get("X-FOSC") != "1":
             return False
+        origin = self.headers.get("Origin")
+        if config.PUBLIC_ORIGIN:            # CSRF: só o domínio público autenticado
+            return origin == config.PUBLIC_ORIGIN
         # Cookies make an Origin check essential. The browser client uses this
         # canonical loopback origin after Cognito redirects back from login.
-        return self.headers.get("Origin") == f"http://127.0.0.1:{self.port}"
+        return origin == f"http://127.0.0.1:{self.port}"
 
     def _session(self):
+        if config.PUBLIC_ORIGIN:
+            # API Gateway overwrites this header from the validated JWT `sub`.
+            # Missing identity fails closed for every /api/* route below.
+            operator = self.headers.get("X-Operator", "").strip()
+            return {"sub": operator, "cognito:username": operator} if operator else {}
         return self.auth.session(self.headers) if self.auth else {}
 
     def _unauthenticated(self, path: str) -> bool:
+        if config.PUBLIC_ORIGIN:
+            if not path.startswith("/api/") or self._session():
+                return False
+            self._json({"ok": False, "error": "authenticated operator identity required"}, 401)
+            return True
         if not self.auth or self._session():
             return False
         if path.startswith("/api/"):
@@ -265,9 +323,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        cognito_connect = ""
+        if config.PUBLIC_ORIGIN and self.oauth_config.get("domain"):
+            cognito_connect = f" {self.oauth_config['domain']}"
         self.send_header("Content-Security-Policy",
                          "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
-                         "connect-src 'self'; frame-ancestors 'none'")
+                         f"connect-src 'self'{cognito_connect}; frame-ancestors 'none'")
         for key, value in headers or []:
             self.send_header(key, value)
         self.end_headers()
@@ -294,7 +355,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
 
-        # These routes are the only unauthenticated surface when Cognito is on.
+        # Public bootstrap for the browser-side authorization-code + PKCE flow.
+        # API Gateway exposes this exact route without a JWT; it returns only
+        # public OAuth metadata, never tokens, secrets, or AWS credentials.
+        if config.PUBLIC_ORIGIN and u.path == "/auth/config":
+            return self._json(self.oauth_config)
+
+        # These routes are the only unauthenticated surface when embedded
+        # Cognito auth is enabled for the local loopback viewer.
         if self.auth and u.path == "/auth/login":
             location, cookie = self.auth.begin()
             return self._redirect(location, [cookie])
@@ -416,14 +484,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def run_viewer(port: int, preselect_target: str | None = None):
     # Validate before binding so a partially configured login cannot expose the
     # panel with its protection silently disabled.
-    settings = CognitoSettings.from_environment(port)
     Handler.port = port
-    Handler.auth = CognitoAuth(settings) if settings else None
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    if config.PUBLIC_ORIGIN:
+        # Atrás de proxy autenticado: o browser faz Authorization Code + PKCE e
+        # o JWT authorizer do API Gateway valida o access token. Validar os
+        # metadados antes do bind impede subir um painel parcialmente protegido.
+        Handler.oauth_config = _proxy_oauth_config()
+        Handler.auth = None
+    else:
+        Handler.oauth_config = {}
+        settings = CognitoSettings.from_environment(port)
+        Handler.auth = CognitoAuth(settings) if settings else None
+    # Single-box: bind só no loopback. Atrás de proxy autenticado (API Gateway +
+    # Cognito), o ALB/VPC Link chega pela interface da task, não pelo loopback,
+    # então bindamos em 0.0.0.0 — o isolamento passa a ser do Security Group
+    # (ingress só do ALB) + authn do Cognito no API Gateway.
+    bind = "0.0.0.0" if config.PUBLIC_ORIGIN else "127.0.0.1"
+    server = http.server.ThreadingHTTPServer((bind, port), Handler)
     server.daemon_threads = True
-    url = f"http://127.0.0.1:{port}/" + (f"#/t/{preselect_target}" if preselect_target else "")
-    auth_note = " · Cognito login required" if settings else " · Cognito disabled"
-    print(f"[fosc] viewer: {url}  (127.0.0.1 only{auth_note}; Ctrl+C para fechar; caçadas continuam rodando)")
+    if config.PUBLIC_ORIGIN:
+        print(f"[fosc] viewer: bind {bind}:{port} · atrás de {config.PUBLIC_ORIGIN} "
+              f"(API Gateway + Cognito · SG restringe ingress ao ALB)")
+    else:
+        url = f"http://127.0.0.1:{port}/" + (f"#/t/{preselect_target}" if preselect_target else "")
+        auth_note = " · Cognito login required" if Handler.auth else " · Cognito disabled"
+        print(f"[fosc] viewer: {url}  (127.0.0.1 only{auth_note}; Ctrl+C para fechar; caçadas continuam rodando)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -431,3 +516,4 @@ def run_viewer(port: int, preselect_target: str | None = None):
     finally:
         server.server_close()
         Handler.auth = None
+        Handler.oauth_config = {}

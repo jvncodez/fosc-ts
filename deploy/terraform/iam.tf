@@ -19,9 +19,9 @@ resource "aws_iam_role" "task" {
 
 data "aws_iam_policy_document" "task" {
   statement {
-    sid     = "BedrockInvokeApprovedModels"
-    effect  = "Allow"
-    actions = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+    sid       = "BedrockInvokeApprovedModels"
+    effect    = "Allow"
+    actions   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
     resources = concat(local.bedrock_foundation_arns, local.bedrock_profile_arns)
   }
 

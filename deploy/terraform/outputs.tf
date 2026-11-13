@@ -54,3 +54,37 @@ output "run_task_command" {
 output "ecr_login_command" {
   value = "aws ecr get-login-password --region ${local.region} | docker login --username AWS --password-stdin ${local.account_id}.dkr.ecr.${local.region}.amazonaws.com"
 }
+
+# ---- Painel (Fase 1) ------------------------------------------------------------
+output "panel_url" {
+  description = "URL pública do painel (API Gateway, sem domínio customizado)."
+  value       = local.panel_public_origin
+}
+
+output "cognito_user_pool_id" {
+  value = aws_cognito_user_pool.panel.id
+}
+
+output "cognito_app_client_id" {
+  value = aws_cognito_user_pool_client.panel.id
+}
+
+output "cognito_hosted_ui_domain" {
+  description = "Domínio do Cognito Hosted UI (login)."
+  value       = "https://${aws_cognito_user_pool_domain.panel.domain}.auth.${local.region}.amazoncognito.com"
+}
+
+output "cognito_create_operator_command" {
+  description = "Cria o primeiro operador (login nativo Cognito, sem auto-cadastro)."
+  value = join(" ", [
+    "aws cognito-idp admin-create-user",
+    "--user-pool-id ${aws_cognito_user_pool.panel.id}",
+    "--username <email-do-operador>",
+    "--user-attributes Name=email,Value=<email-do-operador> Name=email_verified,Value=true",
+    "--region ${local.region}",
+  ])
+}
+
+output "panel_cluster_service" {
+  value = aws_ecs_service.panel.name
+}

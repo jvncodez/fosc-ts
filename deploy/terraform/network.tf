@@ -7,21 +7,22 @@
 
 # ---- Security groups -----------------------------------------------------------
 resource "aws_security_group" "task" {
-  name        = "${local.name}-task"
-  description = "Egress da task Fargate — fechado ao alvo autorizado + AWS endpoints."
+  name = "${local.name}-task"
+  # ASCII puro: a API EC2 CreateSecurityGroup rejeita GroupDescription fora de ASCII.
+  description = "Task egress - closed to the authorized target + AWS endpoints."
   vpc_id      = var.vpc_id
 }
 
 resource "aws_security_group" "efs" {
   name        = "${local.name}-efs"
-  description = "NFS do EFS — só a task monta."
+  description = "EFS NFS - only the task mounts it."
   vpc_id      = var.vpc_id
 }
 
 resource "aws_security_group" "endpoints" {
   count       = var.create_vpc_endpoints ? 1 : 0
   name        = "${local.name}-vpce"
-  description = "HTTPS dos VPC endpoints — só a task chama."
+  description = "VPC endpoints HTTPS - only the task calls them."
   vpc_id      = var.vpc_id
 }
 
@@ -84,6 +85,24 @@ resource "aws_vpc_security_group_ingress_rule" "endpoints_from_task" {
   from_port                    = 443
   to_port                      = 443
   referenced_security_group_id = aws_security_group.task.id
+}
+
+# O DNS privado dos endpoints (private_dns_enabled=true) passa a responder
+# pelos nomes publicos (sts.<region>.amazonaws.com etc.) para QUALQUER host
+# dentro desta VPC - inclusive a maquina de trabalho usada para operar o
+# Terraform/AWS CLI, que nao pertence ao SG da task/painel. Sem este ingress,
+# toda chamada AWS CLI feita desta VPC para os servicos endpoint'ados passa a
+# travar (DNS resolve para o IP privado, SG bloqueia a conexao). Decisao
+# registrada: liberar o CIDR inteiro da VPC e nao so os SGs task/panel, porque
+# e um ambiente de workshop de uso unico - nao expoe os endpoints a internet.
+resource "aws_vpc_security_group_ingress_rule" "endpoints_from_vpc" {
+  count             = var.create_vpc_endpoints ? 1 : 0
+  security_group_id = aws_security_group.endpoints[0].id
+  description       = "HTTPS from the whole VPC (workstation AWS CLI access)"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+  cidr_ipv4         = data.aws_vpc.selected.cidr_block
 }
 
 # task -> S3 (gateway endpoint, prefix list) p/ puxar camadas de imagem do ECR
