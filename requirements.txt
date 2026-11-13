@@ -1,4 +1,8 @@
 # Python dependencies: `rich` renders the live terminal dashboard; PyJWT
-# validates Cognito User Pool tokens when the optional local viewer login is on.
+# validates Cognito User Pool tokens when the optional local viewer login is on;
+# boto3 is the SQS client used by fosc/jobqueue.py whenever SENTINELA_SQS_URL
+# is set (always true in production, painel e worker) — faltava aqui, e por
+# isso start_hunt() quebrava com ModuleNotFoundError ao enfileirar uma caçada.
 rich
 PyJWT[crypto]
+boto3

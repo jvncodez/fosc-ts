@@ -408,7 +408,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = (WEB_DIR / name).read_bytes() if name else b"/* live: sem mock */\n"
             return self._send(body, ctype)
         if u.path == "/api/session":
-            return self._json({"ok": True, "enabled": bool(self.auth), "user": self._session()})
+            # "enabled" diz ao front se deve mostrar o botão de logout. No modo
+            # embutido local isso é self.auth; no modo proxy não há CognitoAuth
+            # local (o browser faz PKCE direto com o Cognito), mas a sessão
+            # ainda é autenticada pelo API Gateway — refletir isso também.
+            enabled = bool(self.auth) or bool(config.PUBLIC_ORIGIN)
+            return self._json({"ok": True, "enabled": enabled, "user": self._session()})
         if u.path == "/api/overview":
             return self._json(overview())
         if u.path == "/api/workspace":

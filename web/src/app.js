@@ -1,4 +1,5 @@
 import { api, DATA_MODE } from './services/api.js';
+import { authenticatedFetch, getIdentity, logout } from './services/auth.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -389,11 +390,15 @@ function toggleProfileMenu(trigger, options = {}) {
 
 async function renderIdentity() {
   try {
-    const response = await fetch(new URL('api/session', document.baseURI), { headers: { Accept: 'application/json' }, cache: 'no-store' });
-    if (response.status === 401) { location.assign(new URL('auth/login', document.baseURI)); return; }
+    // authenticatedFetch cobre os dois modos (Bearer no proxy, cookie no
+    // viewer embutido) e já reinicia o login sozinha se vier 401.
+    const response = await authenticatedFetch(new URL('api/session', document.baseURI), { headers: { Accept: 'application/json' }, cache: 'no-store' });
     if (!response.ok) return;
     const session = await response.json();
-    const user = session.user || {};
+    // No modo proxy, o servidor só vê o `sub` (header X-Operator vindo do
+    // JWT authorizer). Nome/e-mail vêm do ID token validado no browser
+    // durante o login (getIdentity) — nunca do access token enviado à API.
+    const user = { ...(session.user || {}), ...(getIdentity() || {}) };
     const email = user.email || '';
     const username = user['cognito:username'] || '';
     const displayName = user.name || (email ? email.split('@')[0] : username) || 'Conta autenticada';
@@ -430,6 +435,7 @@ document.addEventListener('click',async event=>{
   if(target.matches('[data-report-mode]')){reportMode=target.dataset.reportMode;content.innerHTML=reportsView();return;}
   if(action==='emergency'){event.preventDefault();openEmergencyDialog();}
   else if(action==='confirm-emergency'){await api.emergencyStop();await updateAndRender('Campanha interrompida; ações pendentes canceladas.','campaign');}
+  else if(action==='logout'){event.preventDefault();closeProfileMenu();await logout();}
   else if(action==='close-modal'){closeModal();}
   else if(action==='dismiss-modal'&&event.target.classList.contains('modal-backdrop'))closeModal();
   else if(action==='save-target'){

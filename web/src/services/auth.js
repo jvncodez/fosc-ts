@@ -1,5 +1,9 @@
 const OAUTH_TRANSACTION_KEY = 'fosc.oauth.transaction';
 const OAUTH_TOKEN_KEY = 'fosc.oauth.access-token';
+// Decoded, already-validated ID token claims kept ONLY for display (profile
+// avatar/name/email). Never the raw ID token, never sent as a bearer — the
+// access token above is the sole credential presented to the API Gateway.
+const IDENTITY_KEY = 'fosc.oauth.identity';
 const CLOCK_SKEW_SECONDS = 30;
 let configPromise;
 let bootstrapPromise;
@@ -163,8 +167,22 @@ async function exchangeCallback(config, code, returnedState) {
     access_token: tokens.access_token,
     expires_at: Number(accessClaims.exp),
   }));
+  // Guarda só os campos de exibição do ID token (já validado acima), nunca o
+  // JWT em si — o painel de perfil (avatar/nome/e-mail) usa isto, a API nunca.
+  const identity = {};
+  for (const key of ['sub', 'email', 'name', 'cognito:username']) {
+    if (idClaims[key] != null) identity[key] = String(idClaims[key]);
+  }
+  sessionStorage.setItem(IDENTITY_KEY, JSON.stringify(identity));
   clearCallbackParameters();
   return tokens.access_token;
+}
+
+// Identidade de exibição (modo proxy). Populada durante exchangeCallback;
+// sobrevive a reloads na mesma aba junto com o access token. Retorna null no
+// modo embutido (a sessão ali é só um cookie; o front usa /api/session).
+export function getIdentity() {
+  return readJson(IDENTITY_KEY);
 }
 
 async function bootstrap() {
@@ -216,6 +234,7 @@ export async function authenticatedFetch(input, options = {}) {
   const response = await fetch(input, { ...options, headers });
   if (response.status === 401) {
     sessionStorage.removeItem(OAUTH_TOKEN_KEY);
+    sessionStorage.removeItem(IDENTITY_KEY);
     await beginLogin(await getOAuthConfig());
   }
   return response;
@@ -229,6 +248,7 @@ export async function logout() {
   }
   sessionStorage.removeItem(OAUTH_TOKEN_KEY);
   sessionStorage.removeItem(OAUTH_TRANSACTION_KEY);
+  sessionStorage.removeItem(IDENTITY_KEY);
   const config = await getOAuthConfig();
   const endpoint = new URL('/logout', config.domain);
   endpoint.search = new URLSearchParams({
