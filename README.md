@@ -4,6 +4,8 @@
 
 ### Ferramenta Ofensiva de Segurança Cibernética · FOSC / TS
 
+![Vice-campeão Hackathon BBTS](https://img.shields.io/badge/%F0%9F%A5%88%20VICE--CAMPE%C3%83O-HACKATHON%20BBTS-FADC00?style=for-the-badge&labelColor=003399)
+
 ![FOSC TS](https://img.shields.io/badge/FOSC-%2F%20TS-003399?style=for-the-badge&labelColor=FADC00)
 ![Hackathon BBTS](https://img.shields.io/badge/Hackathon-BBTS-FADC00?style=for-the-badge&labelColor=003399)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-003399?style=flat-square&logo=python&logoColor=FADC00)
@@ -13,7 +15,7 @@
 
 **Um agente autônomo de segurança ofensiva que transforma reconhecimento em investigação, validação e documentação de vulnerabilidades.**
 
-> 🟡🔵 **Agente utilizado no Hackathon BBTS** — edição **FOSC / TS**.
+> 🥈 **Vice-campeão do Hackathon BBTS** · 🟡🔵 agente da edição **FOSC / TS**.
 
 Construído sobre o Claude Code, o FOSC AGENT orquestra ferramentas de reconhecimento e agentes especializados para investigar superfícies de ataque, analisar endpoints e validar possíveis vulnerabilidades.
 
