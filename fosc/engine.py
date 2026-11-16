@@ -51,7 +51,8 @@ def _js_for(item: dict, surface: dict) -> list[str]:
 
 def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict,
              surface: dict, stats: dict, timeout: int, extra_headers: list[str] | None = None,
-             audit_log=None, scope_label: str = "") -> dict:
+             audit_log=None, scope_label: str = "", account_a: list[str] | None = None,
+             account_b: list[str] | None = None) -> dict:
     classes = suggest_classes(item, stats)
     lessons = knowledge.relevant(item, classes)
     learned = knowledge.format_for_prompt(lessons, target)
@@ -67,7 +68,8 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
     hints = knowledge.payload_hints(target, item, classes)
     if hints:
         learned = (learned + "\n\n" + hints).strip()
-    prompt = build_hunt_prompt(target, scope_note, item, classes, learned, _js_for(item, surface), extra_headers)
+    prompt = build_hunt_prompt(target, scope_note, item, classes, learned, _js_for(item, surface),
+                               extra_headers, account_a, account_b)
 
     commands: list[str] = []
 
@@ -301,7 +303,13 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
              timeout: int = config.DEFAULT_TASK_TIMEOUT, continuous: bool = False,
              interval: int = config.DEFAULT_CONTINUOUS_INTERVAL, max_items: int | None = None,
              fresh: bool = False, nuclei: bool = True, content: bool = True,
-             extra_headers: list[str] | None = None, scope_subdomains: bool = False):
+             extra_headers: list[str] | None = None, scope_subdomains: bool = False,
+             account_a: list[str] | None = None, account_b: list[str] | None = None):
+    # Two-account IDOR mode: when A/B identities are given but no explicit auth
+    # headers, A becomes the primary identity for all authenticated testing; the
+    # cross-account (A vs B) object-access test runs on top of it.
+    if not extra_headers and account_a:
+        extra_headers = list(account_a)
     # Deterministic scope: strict (exact host) by default for a bank engagement;
     # subdomains only when the operator explicitly opts in. The note handed to the
     # agent forbids drift, and in_scope() enforces the same rule mechanically.
@@ -520,7 +528,7 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
                         state.activity(item, "task started", kind="system")
                         running[ex.submit(hunt_one, state, out, target, scope_note, item,
                                           surface, stats, timeout, extra_headers,
-                                          log, scope.label())] = item
+                                          log, scope.label(), account_a, account_b)] = item
                     out.set_running(len(running))
                     if stop and not running:
                         break

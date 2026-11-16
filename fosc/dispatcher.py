@@ -29,6 +29,10 @@ def _argv_for(job: dict) -> list[str]:
         argv.append("--no-nuclei")
     if (p.get("scope") or "").strip():
         argv += ["--scope", str(p["scope"]).strip()[:500]]
+    for h in (p.get("account_a") or []):
+        argv += ["--account-a", str(h)[:1000]]
+    for h in (p.get("account_b") or []):
+        argv += ["--account-b", str(h)[:1000]]
     return argv
 
 

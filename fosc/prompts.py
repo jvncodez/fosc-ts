@@ -436,12 +436,33 @@ Do not run any tools. Final answer is the structured output only."""
 
 
 def build_hunt_prompt(target: str, scope_note: str, item: dict, classes: list[str],
-                      learned: str, js_files: list[str], extra_headers: list[str] | None = None) -> str:
+                      learned: str, js_files: list[str], extra_headers: list[str] | None = None,
+                      account_a: list[str] | None = None, account_b: list[str] | None = None) -> str:
     auth = ""
     if extra_headers:
         auth = "\nAuthentication — send these header(s) on EVERY request to the in-scope target:\n" + \
                "\n".join(f"  {h}" for h in extra_headers) + \
                "\nUse them to reach and test the authenticated surface (authZ/IDOR, mass assignment, logic).\n"
+    accounts = ""
+    if account_a and account_b:
+        accounts = (
+            "\nTWO AUTHENTICATED IDENTITIES are provided — this is the DEFINITIVE test for "
+            "IDOR / broken object-level authorization. Identity A is YOU; identity B is a "
+            "separate victim user you also control (for PoC only).\n"
+            "Identity A — send these header(s) to act as user A:\n" +
+            "\n".join(f"  {h}" for h in account_a) +
+            "\nIdentity B — these header(s) belong to a DIFFERENT user (the victim):\n" +
+            "\n".join(f"  {h}" for h in account_b) +
+            "\nMethod: as A, first learn B's object identifiers (B's user id, account, order, "
+            "document, file ids — capture them by browsing as B once). Then, authenticated as A, "
+            "try to READ and to MODIFY each of B's objects through this endpoint (swap ids/UUIDs, "
+            "tenant/org headers, nested JSON owner fields, mass-assignment of owner/role). Repeat "
+            "the mirror direction (B against A) to rule out symmetric sharing.\n"
+            "Confirm IDOR/broken-authZ ONLY with CROSS-ACCOUNT evidence: A obtaining or changing "
+            "data that provably belongs to B. Put B's distinctive data (B's email / id / order "
+            "number returned to A) in evidence_marker and in steps. NEVER destroy B's data — a read "
+            "or a reversible change is the PoC. If the object is correctly scoped (A gets 403/404 or "
+            "only its own data), that is NOT a finding: say so.\n")
     js_hint = ""
     if js_files:
         js_hint = "\nJS files on this host (read them for hidden endpoints/params if useful):\n" + \
@@ -468,7 +489,7 @@ Item to hunt:
 {nuclei}{js_hint}
 
 Vuln classes to test, in priority order: {', '.join(classes[:6])}
-{auth}{lang}
+{auth}{accounts}{lang}
 {learned or 'No lessons from past hunts yet.'}
 """
 

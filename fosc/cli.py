@@ -30,6 +30,8 @@ def do_hunt(args):
         nuclei=not args.no_nuclei,
         content=not args.no_content,
         extra_headers=(args.header or []) + ([args.auth] if args.auth else []),
+        account_a=args.account_a,
+        account_b=args.account_b,
     )
     # Single-pass hunt finished on a terminal: open the follow-up chat.
     # (continuous mode never returns here; panel-launched hunts aren't a TTY.)
@@ -258,6 +260,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="header enviado em toda requisição (repetível); use p/ autenticar e testar a superfície logada")
     p.add_argument("--auth", default=None, metavar="'Authorization: Bearer ...'",
                     help="atalho para um header de autenticação")
+    p.add_argument("--account-a", dest="account_a", action="append", metavar="'Cookie: s=A'",
+                    help="modo 2-contas (IDOR cross-tenant): header(s) da identidade A — repetível")
+    p.add_argument("--account-b", dest="account_b", action="append", metavar="'Cookie: s=B'",
+                    help="modo 2-contas: header(s) da identidade B (vítima do PoC) — repetível")
     p.add_argument("--no-chat", action="store_true",
                     help="with -h: do not open the interactive follow-up chat after the hunt")
     p.add_argument("--chat-model", default=None,
