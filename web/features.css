@@ -226,3 +226,13 @@ a:active,.row-link:active { color: var(--link-pressed); }
 .fd-council .fd-h{margin-bottom:2px}
 .fd-seat{padding:13px 15px}
 .fd-seat-head strong{font:700 14px/20px var(--font-titles)}
+
+/* Modo 2-contas (IDOR cross-tenant) no formulário de nova campanha */
+.two-account { border: 1px solid var(--border, #243049); border-radius: 10px; padding: 8px 12px; }
+.two-account > summary { cursor: pointer; font-weight: 600; color: var(--text-muted, #9fb0c9); list-style: none; }
+.two-account > summary::-webkit-details-marker { display: none; }
+.two-account > summary::before { content: "▸ "; color: var(--accent, #fadc00); }
+.two-account[open] > summary::before { content: "▾ "; }
+.two-account[open] > summary { margin-bottom: 8px; }
+.two-account textarea { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
+.two-account-hint { display: block; margin-top: 6px; color: var(--text-muted, #9fb0c9); }
