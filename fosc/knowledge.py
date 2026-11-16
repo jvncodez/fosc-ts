@@ -82,6 +82,41 @@ def add_lesson(kind: str, text: str, target: str, item: dict, vuln_class: str | 
     return lid
 
 
+def record_technique(target: str, item: dict, waf: str | None, vuln_class: str | None,
+                     payload: str, status: str, note: str | None, tech: list[str]):
+    """Structured payload memory: one exact payload/bypass and whether it worked
+    or was blocked, keyed by (tech, class, WAF) for later recall."""
+    payload = (payload or "").strip()
+    if not payload or status not in ("worked", "blocked"):
+        return
+    _append("techniques.jsonl", {
+        "ts": time.time(), "target": target, "pattern": item.get("pattern"),
+        "tech": sorted(set(tech or [])), "waf": (waf or "").strip().lower() or None,
+        "vuln_class": _norm_class(vuln_class), "payload": payload[:400],
+        "status": status, "note": (note or "")[:300],
+    })
+
+
+def record_techniques(target: str, item: dict, waf: str | None, techniques: list[dict], tech: list[str]):
+    seen = set()
+    for t in techniques or []:
+        payload = (t.get("payload") or "").strip()
+        key = (payload, t.get("status"), _norm_class(t.get("vuln_class")))
+        if not payload or key in seen:
+            continue
+        seen.add(key)
+        record_technique(target, item, waf, t.get("vuln_class"), payload,
+                         t.get("status"), t.get("note"), tech)
+
+
+def target_waf(target: str) -> str | None:
+    """The WAF most recently observed for a target (stable across runs)."""
+    for r in reversed(_read("techniques.jsonl", 5000)):
+        if r.get("target") == target and r.get("waf"):
+            return r["waf"]
+    return None
+
+
 def note_target(target: str, line: str):
     line = (line or "").strip()
     if not line:
@@ -230,6 +265,76 @@ def relevant(item: dict, classes: list[str], k: int = 8) -> list[dict]:
         blended.append((score, les))
     blended.sort(key=lambda x: x[0], reverse=True)
     return [les for _, les in blended[:k]]
+
+
+def payload_hints(target: str, item: dict, classes: list[str], k: int = 6) -> str:
+    """The exact payloads/bypasses that worked (and the notable dead ends) on
+    similar stacks, so the agent arrives already knowing what lands. Keyed by
+    (tech, class) and boosted when the WAF matches this target's known WAF."""
+    recs = _read("techniques.jsonl", 5000)
+    if not recs:
+        return ""
+    item_tech = {t.lower() for t in item.get("tech") or []}
+    class_set = {c.lower() for c in classes}
+    waf = target_waf(target)
+    item_tok = _tokens(item.get("pattern", "") + " " + " ".join(item.get("params") or []))
+    now = time.time()
+
+    pool = []  # (base, rec, dedup_key, record)
+    seen = set()
+    for r in recs:
+        tech_ov = len(item_tech & {t.lower() for t in r.get("tech") or []})
+        cls_match = 1 if (r.get("vuln_class") or "") in class_set else 0
+        tok_ov = len(item_tok & _tokens((r.get("pattern") or "") + " " + r.get("note", "")))
+        if tech_ov == 0 and cls_match == 0 and tok_ov == 0:
+            continue  # unrelated to this endpoint
+        key = (r.get("payload"), r.get("status"), r.get("vuln_class"))
+        if key in seen:
+            continue
+        seen.add(key)
+        base = 3 * cls_match + 2 * tech_ov + min(2, tok_ov)
+        base += 1.5 if (r.get("waf") and waf and r["waf"] == waf) else 0.0
+        base += 1.5 if r.get("status") == "worked" else 0.3
+        rec = math.exp(-((now - r.get("ts", now)) / 86400) / 90)  # ~3mo half-ish
+        pool.append((base * rec, rec, key, r))
+    if not pool:
+        return ""
+    pool.sort(key=lambda x: x[0], reverse=True)
+    pool = pool[: max(k * 2, _SEM_PREFILTER)]
+
+    # Semantic rerank: match payload+note meaning to the class/endpoint context.
+    sims = None
+    if config.EMBED_BLEND > 0:
+        from . import semantic
+        if semantic.available():
+            query = " ".join(classes[:5]) + " " + item.get("pattern", "")
+            docs = [f"{(r.get('vuln_class') or '')} {r.get('payload', '')} {r.get('note', '')}"
+                    for *_, r in pool]
+            sims = semantic.similarities(query, docs)
+    if sims is not None:
+        b = config.EMBED_BLEND
+        pool = sorted(
+            ((((1 - b) * base + b * max(0.0, sim) * 6) , rec, key, r)
+             for (base, rec, key, r), sim in zip(pool, sims)),
+            key=lambda x: x[0], reverse=True)
+
+    worked, blocked = [], []
+    for _, _, _, r in pool:
+        waf_tag = f", waf={r['waf']}" if r.get("waf") else ""
+        tech_tag = (",".join(r.get("tech") or [])[:40]) or "-"
+        line = f"- ({r.get('vuln_class') or '-'}; tech={tech_tag}{waf_tag}) `{r.get('payload')}`" + \
+               (f" — {r['note']}" if r.get("note") else "")
+        (worked if r.get("status") == "worked" else blocked).append(line)
+        if len(worked) >= k and len(blocked) >= max(2, k // 2):
+            break
+    parts = []
+    if worked:
+        parts.append("Payloads/bypasses that WORKED before on similar stacks (reuse first):\n"
+                     + "\n".join(worked[:k]))
+    if blocked:
+        parts.append("Blocked before on similar stacks (bring a real bypass or skip):\n"
+                     + "\n".join(blocked[: max(2, k // 2)]))
+    return "\n\n".join(parts)
 
 
 def format_for_prompt(lessons: list[dict], target: str) -> str:

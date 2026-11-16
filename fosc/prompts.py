@@ -26,6 +26,23 @@ HUNT_SCHEMA = {
         "shell_howto": {"type": ["string", "null"]},
         "poc_path": {"type": ["string", "null"]},
         "tech_observed": {"type": "array", "items": {"type": "string"}},
+        "waf_observed": {"type": ["string", "null"]},
+        # Structured payload memory: the EXACT payloads/bypasses that worked or
+        # were blocked on this endpoint, keyed later by (tech, class, WAF) so a
+        # future hunt on a similar stack arrives already knowing what lands.
+        "techniques": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "payload": {"type": "string"},
+                    "vuln_class": {"type": ["string", "null"]},
+                    "status": {"type": "string", "enum": ["worked", "blocked"]},
+                    "note": {"type": ["string", "null"]},
+                },
+                "required": ["payload", "status"],
+            },
+        },
         "lessons": {"type": "array", "items": {"type": "string"}},
         "target_notes": {"type": "array", "items": {"type": "string"}},
         "tools_installed": {"type": "array", "items": {"type": "string"}},
@@ -210,6 +227,16 @@ Method:
 - target_notes: short facts about this target worth remembering next time
   (auth scheme, WAF, interesting endpoints, test accounts that worked).
 - tech_observed: tech stack you saw (framework, server, language, CDN/WAF).
+- waf_observed: the WAF/CDN in front of this endpoint if any (e.g. cloudflare,
+  akamai, aws-waf, modsecurity, imperva), or null/"none". This keys the payload
+  memory below, so be specific.
+- techniques: the EXACT payloads/bypasses you tried that mattered, as
+  {payload, vuln_class, status: worked|blocked, note}. Record the ones that
+  WORKED (so a future hunt reuses them instantly) AND the ones the defense
+  BLOCKED with how (so the next hunt skips the dead end or brings a bypass).
+  Put the literal payload string in `payload` (the encoding/trick itself, not a
+  whole curl), keep it short, no secrets. This is how FOSC compounds strength
+  across hunts — fill it whenever you learned what does or doesn't land.
 
 LEARNING & SELF-REMEDIATION — get stronger at every obstacle, never give up on "I don't know how":
 - When you are blocked — a defense you can't bypass yet, a vuln class you're unsure how to exploit, a missing

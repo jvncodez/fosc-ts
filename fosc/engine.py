@@ -62,6 +62,11 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
     tools_note = toolrunner.arsenal_note()
     if tools_note:
         learned = (learned + "\n\n" + tools_note).strip()
+    # Payload memory: exact bypasses that landed (and the dead ends) on similar
+    # (tech, class, WAF) from past hunts — the agent starts knowing what works.
+    hints = knowledge.payload_hints(target, item, classes)
+    if hints:
+        learned = (learned + "\n\n" + hints).strip()
     prompt = build_hunt_prompt(target, scope_note, item, classes, learned, _js_for(item, surface), extra_headers)
 
     commands: list[str] = []
@@ -106,6 +111,16 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
             knowledge.note_target(target, note)
         for tool in f.get("tools_installed") or []:
             knowledge.note_tool(tool)  # grow the permanent arsenal
+        # Payload memory: persist the exact payloads/bypasses (worked AND blocked)
+        # keyed by (tech, class, WAF) so future hunts on this stack reuse them.
+        waf = (f.get("waf_observed") or "").strip().lower() or None
+        if waf and waf != "none":
+            knowledge.note_target(target, f"WAF/CDN: {waf}")
+        techs = f.get("techniques") or []
+        for t in techs:
+            if not t.get("vuln_class"):
+                t["vuln_class"] = cls
+        knowledge.record_techniques(target, item, waf, techs, tech)
 
         verdict = f.get("verdict", "inconclusive")
         res = {"verdict": verdict, "vuln_class": cls, "severity": f.get("severity"),
