@@ -116,6 +116,10 @@ class _Store:
     def running_count(self) -> int:
         return self._conn().execute("SELECT COUNT(*) FROM jobs WHERE status=?", (RUNNING,)).fetchone()[0]
 
+    def running_jobs(self) -> list[dict]:
+        rows = self._conn().execute("SELECT * FROM jobs WHERE status=?", (RUNNING,)).fetchall()
+        return [_row(r) for r in rows]
+
     def snapshot(self) -> list[dict]:
         rows = self._conn().execute(
             "SELECT * FROM jobs WHERE status IN (?,?) ORDER BY status DESC, priority, enqueued_at",

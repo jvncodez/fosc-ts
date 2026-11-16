@@ -12,7 +12,7 @@ import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from . import audit, chain, claude_runner, config, council, health, knowledge, models, net, plan, ratectl, toolrunner
+from . import audit, chain, claude_runner, config, council, health, knowledge, models, net, plan, ratectl, replay, toolrunner
 from .notify import notify_finding
 from .privesc import attempt_privesc
 from .prompts import (CONSOLIDATE_SCHEMA, CONSOLIDATE_SYSTEM, HUNT_SCHEMA, HUNT_SYSTEM,
@@ -144,6 +144,26 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
                 res["verdict"] = "duplicate"
             else:
                 state.set_active(item, "reviewing")
+                # Cheap mechanical pre-gate: replay the PoC; a clear non-repro is
+                # suppressed here without spending the Opus reviewer.
+                if config.MECH_REPLAY:
+                    rp = replay.replay_check(f.get("repro_curl"), f.get("evidence_marker"), target,
+                                             proxy_url=claude_runner.PROXY_URL,
+                                             timeout=config.MECH_REPLAY_TIMEOUT)
+                    if rp["status"] == "absent":
+                        act(f"replay mecânico: {rp['detail']} — refutado sem revisor")
+                        res["verdict"] = "refuted"
+                        res["review"] = "replay mecânico não reproduziu o evidence_marker"
+                        knowledge.add_lesson("fp", f"repro_curl não reproduziu o marker para "
+                                             f"{cls or 'achado'} em {item.get('pattern')}", target, item, cls, tech)
+                        knowledge.record_event(target, item, "refuted", cls, tech)
+                        if audit_log:
+                            audit_log.record("task", actor=operator(), minimize=True, url=item.get("url"),
+                                             model=run.get("model"), status=run["status"], verdict="refuted",
+                                             cost=res.get("cost"), commands=commands[:50])
+                        return res
+                    if rp["status"] == "reproduced":
+                        act("replay mecânico reproduziu o marker; validando com o revisor")
                 act("handing finding to Opus reviewer")
                 review = verify_finding(scope_note, item, f, state.task_dir(item), on_activity=act)
                 state.add_cost(review.get("cost", 0))

@@ -141,6 +141,19 @@ MODEL_LADDERS = {
 CHAIN_ENABLED = os.environ.get("SENTINELA_CHAIN", "1").lower() not in ("0", "false", "no")
 CHAIN_MIN_FINDINGS = int(os.environ.get("SENTINELA_CHAIN_MIN", "2"))  # need ≥ this to attempt
 
+# Rigor & cost ---------------------------------------------------------------
+# Cheap mechanical replay BEFORE the (expensive) Opus reviewer: FOSC replays the
+# agent's repro_curl (idempotent GET/HEAD only, in-scope only, no shell) and
+# checks the evidence_marker. A clear non-reproduction suppresses the finding
+# without spending the reviewer. Off -> every confirmed finding goes straight to
+# Opus as before.
+MECH_REPLAY = os.environ.get("SENTINELA_MECH_REPLAY", "1").lower() not in ("0", "false", "no")
+MECH_REPLAY_TIMEOUT = int(os.environ.get("SENTINELA_MECH_REPLAY_TIMEOUT", "15"))
+# Stuck-job reaper: a RUNNING job whose hunt process is dead (crashed worker/
+# dispatcher) is freed so the same target can run again, instead of blocking the
+# campaign forever. Only fires when the run state PROVES the hunt is not alive.
+QUEUE_REAP_GRACE = int(os.environ.get("SENTINELA_REAP_GRACE", "120"))  # s before a RUNNING job is eligible
+
 MODEL_MAX_ATTEMPTS = 3        # never try more than this many models for one call
 # A slow (not offline) model is abandoned at this fraction of the task's hard
 # timeout so the fallback model still has time to finish.

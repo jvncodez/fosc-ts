@@ -12,6 +12,54 @@ import threading
 import time
 
 from . import config, jobqueue
+from .state import RunState
+
+# Run meta statuses that mean the hunt is over (so a still-RUNNING job is an orphan).
+_TERMINAL = {"finished", "stopped", "halted", "denied", "offline", "error", "completed"}
+
+
+def _pid_alive(pid) -> bool:
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True            # exists but not ours
+    except (ValueError, TypeError, OSError):
+        return False
+    return True
+
+
+def reap_stale(queue, grace: int = None, on_event=None) -> int:
+    """Free jobs stuck in RUNNING because their hunt process is gone (crashed
+    worker/dispatcher). Only acts when the RUN STATE proves the hunt is not alive
+    — a long but healthy hunt is never touched. Returns how many were freed."""
+    grace = config.QUEUE_REAP_GRACE if grace is None else grace
+    try:
+        jobs = queue.store.running_jobs()
+    except Exception:
+        return 0
+    now, freed = time.time(), 0
+    for j in jobs:
+        if now - (j.get("started_at") or 0) < grace:
+            continue                       # too fresh — the hunt may still be booting
+        try:
+            meta = RunState(j["target"]).read_meta()
+        except Exception:
+            meta = {}
+        status = (meta.get("status") or "").lower()
+        pid = meta.get("pid")
+        if _pid_alive(pid) and status not in _TERMINAL:
+            continue                       # genuinely running — leave it
+        ok = status == "finished"
+        try:
+            queue.complete(j["job_id"], ok)
+            freed += 1
+            if on_event:
+                on_event("reaped", j)
+        except Exception:
+            pass
+    return freed
 
 
 def _argv_for(job: dict) -> list[str]:
@@ -69,6 +117,12 @@ class Dispatcher:
     def tick(self) -> int:
         """One lease+launch cycle. Returns how many jobs were started."""
         self._reap()
+        try:
+            n = reap_stale(self.queue, on_event=self.on_event)
+            if n:
+                print(f"[fosc] reaper: {n} job(s) preso(s) liberado(s) (processo morto)")
+        except Exception as e:
+            print(f"[fosc] reaper erro: {e}")
         room = self.cap - len(self._threads)
         if room <= 0:
             return 0

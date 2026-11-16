@@ -13,8 +13,9 @@ def isolate(testcase):
     """Point every FOSC path at a throwaway dir and swap in the fake claude CLI."""
     tmp = Path(tempfile.mkdtemp(prefix="fosc-test-"))
     saved = (config.FOSC_HOME, config.STATE_ROOT, config.KNOWLEDGE_ROOT, config.CHAT_ROOT,
-             config.CONFIG_PATH, config.CLAUDE_BIN, config.AUTHZ_MODE)
+             config.CONFIG_PATH, config.CLAUDE_BIN, config.AUTHZ_MODE, config.MECH_REPLAY)
     config.AUTHZ_MODE = "yolo"  # tests auto-approve the human-in-the-loop gate
+    config.MECH_REPLAY = False  # fake findings can't reach a live target to replay against
     config.FOSC_HOME = tmp
     config.STATE_ROOT = tmp / "runs"
     config.KNOWLEDGE_ROOT = tmp / "knowledge"
@@ -27,7 +28,7 @@ def isolate(testcase):
 
     def restore():
         (config.FOSC_HOME, config.STATE_ROOT, config.KNOWLEDGE_ROOT, config.CHAT_ROOT,
-         config.CONFIG_PATH, config.CLAUDE_BIN, config.AUTHZ_MODE) = saved
+         config.CONFIG_PATH, config.CLAUDE_BIN, config.AUTHZ_MODE, config.MECH_REPLAY) = saved
         for k in ("FAKE_HUNT", "FAKE_REVIEW"):
             os.environ.pop(k, None)
     testcase.addCleanup(restore)
