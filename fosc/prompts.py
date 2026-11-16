@@ -437,7 +437,8 @@ Do not run any tools. Final answer is the structured output only."""
 
 def build_hunt_prompt(target: str, scope_note: str, item: dict, classes: list[str],
                       learned: str, js_files: list[str], extra_headers: list[str] | None = None,
-                      account_a: list[str] | None = None, account_b: list[str] | None = None) -> str:
+                      account_a: list[str] | None = None, account_b: list[str] | None = None,
+                      stealth_block: str = "") -> str:
     auth = ""
     if extra_headers:
         auth = "\nAuthentication — send these header(s) on EVERY request to the in-scope target:\n" + \
@@ -490,7 +491,7 @@ Item to hunt:
 
 Vuln classes to test, in priority order: {', '.join(classes[:6])}
 {auth}{accounts}{lang}
-{learned or 'No lessons from past hunts yet.'}
+{(stealth_block + chr(10)) if stealth_block else ''}{learned or 'No lessons from past hunts yet.'}
 """
 
 

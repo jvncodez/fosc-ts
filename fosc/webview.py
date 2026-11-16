@@ -118,7 +118,7 @@ def start_hunt(p: dict) -> dict:
         from . import jobqueue
         q = jobqueue.get_queue()
         opts = {k: p.get(k) for k in ("workers", "timeout", "max_items", "continuous", "fresh",
-                                      "no_nuclei", "scope", "account_a", "account_b")}
+                                      "no_nuclei", "scope", "account_a", "account_b", "stealth")}
         job, created = q.enqueue(target, opts, priority=int(p.get("priority") or 5),
                                  who=p.get("who") or "painel")
         pos = next((j.get("position") for j in q.snapshot() if j["job_id"] == job["job_id"]), None)
@@ -148,6 +148,8 @@ def start_hunt(p: dict) -> dict:
         argv += ["--account-a", str(h)[:1000]]
     for h in (p.get("account_b") or []):
         argv += ["--account-b", str(h)[:1000]]
+    if p.get("stealth"):
+        argv.append("--stealth")
     log = st.log_path.open("a")
     log.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} launched from viewer =====\n")
     log.flush()

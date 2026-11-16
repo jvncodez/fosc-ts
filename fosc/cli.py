@@ -32,6 +32,7 @@ def do_hunt(args):
         extra_headers=(args.header or []) + ([args.auth] if args.auth else []),
         account_a=args.account_a,
         account_b=args.account_b,
+        stealth=args.stealth,
     )
     # Single-pass hunt finished on a terminal: open the follow-up chat.
     # (continuous mode never returns here; panel-launched hunts aren't a TTY.)
@@ -264,6 +265,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="modo 2-contas (IDOR cross-tenant): header(s) da identidade A — repetível")
     p.add_argument("--account-b", dest="account_b", action="append", metavar="'Cookie: s=B'",
                     help="modo 2-contas: header(s) da identidade B (vítima do PoC) — repetível")
+    p.add_argument("--stealth", action="store_true",
+                    help="modo stealth/OPSEC: headers de navegador, taxa baixa e pacing low-and-slow (escopo autorizado)")
     p.add_argument("--no-chat", action="store_true",
                     help="with -h: do not open the interactive follow-up chat after the hunt")
     p.add_argument("--chat-model", default=None,

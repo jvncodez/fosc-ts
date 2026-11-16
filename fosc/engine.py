@@ -52,7 +52,7 @@ def _js_for(item: dict, surface: dict) -> list[str]:
 def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict,
              surface: dict, stats: dict, timeout: int, extra_headers: list[str] | None = None,
              audit_log=None, scope_label: str = "", account_a: list[str] | None = None,
-             account_b: list[str] | None = None) -> dict:
+             account_b: list[str] | None = None, stealth: bool = False) -> dict:
     classes = suggest_classes(item, stats)
     lessons = knowledge.relevant(item, classes)
     learned = knowledge.format_for_prompt(lessons, target)
@@ -68,8 +68,12 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
     hints = knowledge.payload_hints(target, item, classes)
     if hints:
         learned = (learned + "\n\n" + hints).strip()
+    stealth_block = ""
+    if stealth:
+        from . import stealth as _stealth
+        stealth_block = _stealth.prompt_block(knowledge.target_waf(target))
     prompt = build_hunt_prompt(target, scope_note, item, classes, learned, _js_for(item, surface),
-                               extra_headers, account_a, account_b)
+                               extra_headers, account_a, account_b, stealth_block)
 
     commands: list[str] = []
 
@@ -324,12 +328,20 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
              interval: int = config.DEFAULT_CONTINUOUS_INTERVAL, max_items: int | None = None,
              fresh: bool = False, nuclei: bool = True, content: bool = True,
              extra_headers: list[str] | None = None, scope_subdomains: bool = False,
-             account_a: list[str] | None = None, account_b: list[str] | None = None):
+             account_a: list[str] | None = None, account_b: list[str] | None = None,
+             stealth: bool = False):
     # Two-account IDOR mode: when A/B identities are given but no explicit auth
     # headers, A becomes the primary identity for all authenticated testing; the
     # cross-account (A vs B) object-access test runs on top of it.
     if not extra_headers and account_a:
         extra_headers = list(account_a)
+    # Stealth/OPSEC: realistic browser headers on every request + a low rate cap
+    # (pinned below, once rate_host is known) + a prompt directive per task.
+    stealth = stealth or config.STEALTH_ENABLED
+    if stealth:
+        from . import stealth as _stealth
+        config.HTTP_UA = _stealth.user_agent(target)
+        extra_headers = _stealth.merge_headers(extra_headers, _stealth.headers(target))
     # Deterministic scope: strict (exact host) by default for a bank engagement;
     # subdomains only when the operator explicitly opts in. The note handed to the
     # agent forbids drift, and in_scope() enforces the same rule mechanically.
@@ -408,6 +420,11 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
 
     probe_url = target if target.startswith(("http://", "https://")) else f"https://{target}"
     rate_host = target_host(target)
+    if stealth:
+        ratectl.REGISTRY.configure(rate_host, start=config.STEALTH_RATE_MAX, hi=config.STEALTH_RATE_MAX)
+        out.info(f"stealth ativo: UA de navegador em toda requisição · teto {config.STEALTH_RATE_MAX} req/s · "
+                 f"pacing low-and-slow e recuo em bloqueio de WAF")
+        state.activity(None, f"modo stealth ativo (teto {config.STEALTH_RATE_MAX} req/s, headers de navegador)", kind="system")
 
     def _on_sample(ok, ms):
         # Adaptive budget: the same probe that guards the breaker steers the rate.
@@ -548,7 +565,7 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
                         state.activity(item, "task started", kind="system")
                         running[ex.submit(hunt_one, state, out, target, scope_note, item,
                                           surface, stats, timeout, extra_headers,
-                                          log, scope.label(), account_a, account_b)] = item
+                                          log, scope.label(), account_a, account_b, stealth)] = item
                     out.set_running(len(running))
                     if stop and not running:
                         break

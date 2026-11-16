@@ -236,3 +236,9 @@ a:active,.row-link:active { color: var(--link-pressed); }
 .two-account[open] > summary { margin-bottom: 8px; }
 .two-account textarea { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
 .two-account-hint { display: block; margin-top: 6px; color: var(--text-muted, #9fb0c9); }
+
+/* Checkbox do modo stealth no formulário de nova campanha */
+.stealth-check { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border, #243049); border-radius: 10px; }
+.stealth-check input { margin-top: 3px; }
+.stealth-check strong { display: block; }
+.stealth-check small { display: block; color: var(--text-muted, #9fb0c9); margin-top: 2px; }

@@ -81,6 +81,8 @@ def _argv_for(job: dict) -> list[str]:
         argv += ["--account-a", str(h)[:1000]]
     for h in (p.get("account_b") or []):
         argv += ["--account-b", str(h)[:1000]]
+    if p.get("stealth"):
+        argv.append("--stealth")
     return argv
 
 

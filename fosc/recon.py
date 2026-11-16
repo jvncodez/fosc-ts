@@ -129,6 +129,7 @@ def discover_hosts(target: str, timeout: int) -> list[dict]:
             with ratectl.share(target_host(target)) as (rate, threads):
                 _, stdout, _ = run_proc(
                     ["httpx", "-silent", "-json", "-td", "-title", "-sc",
+                     "-H", f"User-Agent: {config.HTTP_UA}",
                      "-rl", str(rate), "-t", str(threads)],
                     input="\n".join(candidates), timeout=timeout,
                 )
@@ -261,7 +262,7 @@ def js_endpoints(target: str, urls: set[str], hosts: list[dict], timeout: int = 
     out: set[str] = set()
     for ju in js:
         try:
-            req = urllib.request.Request(ju, headers={"User-Agent": "bb-sentinela-recon"})
+            req = urllib.request.Request(ju, headers={"User-Agent": config.HTTP_UA})
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 body = r.read(3_000_000).decode("utf-8", "replace")
         except Exception:

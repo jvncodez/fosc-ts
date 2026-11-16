@@ -154,6 +154,17 @@ MECH_REPLAY_TIMEOUT = int(os.environ.get("SENTINELA_MECH_REPLAY_TIMEOUT", "15"))
 # campaign forever. Only fires when the run state PROVES the hunt is not alive.
 QUEUE_REAP_GRACE = int(os.environ.get("SENTINELA_REAP_GRACE", "120"))  # s before a RUNNING job is eligible
 
+# Stealth / OPSEC (authorized engagements) -----------------------------------
+# Opt-in. Makes FOSC emulate a real user and stay under the radar: realistic
+# browser headers everywhere (not scanner User-Agents), a low rate cap, and a
+# prompt directive to pace low-and-slow and back off on WAF/ratelimit blocks.
+# This is engagement realism within scope — never evasion for malicious use.
+STEALTH_ENABLED = os.environ.get("SENTINELA_STEALTH", "").lower() in ("1", "true", "yes")
+STEALTH_RATE_MAX = int(os.environ.get("SENTINELA_STEALTH_RATE", "3"))  # req/s cap per host in stealth
+STEALTH_UA = os.environ.get("SENTINELA_STEALTH_UA", "")  # override the rotating realistic UA
+# User-Agent the mechanical recon layer sends (overridden by stealth at runtime).
+HTTP_UA = os.environ.get("SENTINELA_UA", "bb-sentinela-recon")
+
 MODEL_MAX_ATTEMPTS = 3        # never try more than this many models for one call
 # A slow (not offline) model is abandoned at this fraction of the task's hard
 # timeout so the fallback model still has time to finish.

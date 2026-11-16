@@ -228,11 +228,12 @@ const liveApi = {
     live.confirmedIds = null;
     return this.getWorkspace();
   },
-  async startCampaign({ target, authorized, workers, scope, accountA, accountB }) {
+  async startCampaign({ target, authorized, workers, scope, accountA, accountB, stealth }) {
     if (!authorized) throw new Error('Confirme a autorização antes de iniciar.');
     const body = { target: String(target || '').trim() };
     if (workers) body.workers = Math.max(1, Math.min(10, Number(workers) || 6));
     if (scope) body.scope = String(scope).slice(0, 500);
+    if (stealth) body.stealth = true;
     // Modo 2-contas: só envia quando as DUAS identidades vieram (IDOR cross-tenant).
     const clean = a => (Array.isArray(a) ? a : []).map(s => String(s).slice(0, 1000)).filter(Boolean).slice(0, 20);
     if (clean(accountA).length && clean(accountB).length) {

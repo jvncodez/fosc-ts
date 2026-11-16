@@ -64,6 +64,20 @@ class _Registry:
     def observe(self, host: str, ok: bool, ms: float | None) -> int:
         return self.host(host).observe(ok, ms)
 
+    def configure(self, host: str, *, start: int | None = None, hi: int | None = None,
+                  lo: int | None = None) -> HostRate:
+        """Set a host's rate bounds (used by stealth to pin a low cap)."""
+        with self._lock:
+            hr = self._hosts.setdefault(host.lower(), HostRate())
+            if lo is not None:
+                hr.lo = max(1, lo)
+            if hi is not None:
+                hr.hi = max(hr.lo, hi)
+            if start is not None:
+                hr.rate = start
+            hr.rate = max(hr.lo, min(hr.hi, hr.rate))
+            return hr
+
     @contextmanager
     def share(self, host: str, parts: int = 1):
         """Reserve a slice of the host budget for one tool. Yields (rate, threads).
@@ -101,4 +115,5 @@ class _Registry:
 
 REGISTRY = _Registry()
 share = REGISTRY.share
+configure = REGISTRY.configure
 observe = REGISTRY.observe
