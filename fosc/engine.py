@@ -12,7 +12,7 @@ import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from . import audit, claude_runner, config, council, health, knowledge, models, net, plan, ratectl, toolrunner
+from . import audit, chain, claude_runner, config, council, health, knowledge, models, net, plan, ratectl, toolrunner
 from .notify import notify_finding
 from .privesc import attempt_privesc
 from .prompts import (CONSOLIDATE_SCHEMA, CONSOLIDATE_SYSTEM, HUNT_SCHEMA, HUNT_SYSTEM,
@@ -554,6 +554,12 @@ def run_hunt(target: str, scope_note: str | None = None, workers: int = config.D
                 consolidate(state, out)
             except Exception as e:
                 out.warn(f"consolidation error: {e}")
+            # Exploit-chaining pass: combine this run's confirmed findings into a
+            # single higher-severity chain, gated by the same verify + Council.
+            try:
+                chain.run_chain_pass(state, out, target, scope_note, log)
+            except Exception as e:
+                out.warn(f"chain pass error: {e}")
             if not continuous:
                 break  # single pass: exactly one round (so --max-items caps the whole run)
         else:

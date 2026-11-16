@@ -70,6 +70,27 @@ CONSOLIDATE_SCHEMA = {
     "required": ["playbook_markdown"],
 }
 
+CHAIN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "chained": {"type": "boolean"},
+        "chain_class": {"type": ["string", "null"]},   # e.g. "IDOR -> account takeover"
+        "severity": {"type": ["string", "null"], "enum": config.SEVERITIES + [None]},
+        "cvss": {"type": ["number", "null"]},
+        "confidence": {"type": ["string", "null"], "enum": ["high", "medium", "low", None]},
+        "title": {"type": ["string", "null"]},
+        "summary": {"type": "string"},
+        "impact": {"type": ["string", "null"]},
+        "steps": {"type": "array", "items": {"type": "string"}},
+        "repro_curl": {"type": ["string", "null"]},
+        "evidence_marker": {"type": ["string", "null"]},
+        "poc_path": {"type": ["string", "null"]},
+        # which input findings were combined (their ids), so we record provenance
+        "components": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["chained", "summary"],
+}
+
 PRIVESC_SCHEMA = {
     "type": "object",
     "properties": {
@@ -369,6 +390,43 @@ official repo in a venv — inspect before running, never `curl|sudo bash`, neve
 security); then retry. Record what unblocked you in `lessons` and any tool you installed in `tools_installed`.
 Your final answer is the structured output only."""
 
+CHAIN_SYSTEM = """You are FOSC's exploit-chain operator, running headless and
+non-interactive on an AUTHORIZED, in-scope engagement. You are given several
+findings that were ALREADY independently confirmed and adversarially verified on
+this target. Your job: decide whether two or more of them can be COMBINED into a
+single attack chain whose real-world impact is HIGHER than any one of them alone,
+and PROVE that chain end-to-end against the live target.
+
+You are not re-testing the individual bugs — they are real. You are looking for
+the composition that a strong attacker would build from them.
+
+Known high-value chain patterns (use as inspiration, not a checklist):
+- IDOR / missing authZ + weak session or email change -> full account takeover.
+- Open redirect + OAuth/SSO flow -> token/code theft -> ATO.
+- SSRF -> cloud metadata (169.254.169.254) -> cloud creds -> data/infra access.
+- Reflected/stored XSS + sensitive action/CSRF-less endpoint -> ATO or admin action.
+- File upload + path/include -> webshell -> RCE.
+- LFI/arbitrary read -> app source/.env/DB creds -> auth as admin / DB access.
+- Subdomain takeover + cookie scope / OAuth redirect -> session theft.
+- SQLi -> credential dump -> reuse against admin/DB/SSH.
+- Low-priv API key / info leak + privileged endpoint -> privilege escalation.
+
+Rules:
+- Demonstrate the chain for REAL against the in-scope target, non-destructively
+  (no data loss, no DoS, no takeover of real users beyond a disposable PoC on your
+  own test accounts). Reuse the components' repro_curl/evidence to stitch the steps.
+- chained=true ONLY with a demonstrated end-to-end result that is genuinely higher
+  impact than the parts. If no honest chain exists, chained=false and say why in
+  summary — do NOT invent or oversell a chain.
+- components: the ids of the findings you actually combined.
+- repro_curl: a single self-contained command if one request proves the chained
+  result; otherwise null and put the ordered steps in `steps`.
+- evidence_marker: a distinctive string in the final response that only appears
+  because the full chain fired.
+- severity/cvss: of the CHAINED outcome (usually higher than any component).
+- Report the highest-impact chain you can actually prove. Final answer is the
+  structured output only."""
+
 CONSOLIDATE_SYSTEM = """You maintain FOSC's hunting playbook. Merge the new
 lessons into the existing playbook: deduplicate, generalize, drop anything
 target-specific or one-off, keep what changes behaviour (which classes pay
@@ -468,3 +526,33 @@ def build_consolidate_prompt(playbook: str, lessons: list[dict]) -> str:
         f"- [{l.get('kind')}] ({l.get('vuln_class') or '-'}; tech={','.join(l.get('tech') or []) or '-'}) {l.get('text')}"
         for l in lessons)
     return f"Existing playbook:\n{playbook or '(empty)'}\n\nNew lessons:\n{lines}\n"
+
+
+def build_chain_prompt(target: str, scope_note: str, findings: list[dict],
+                       related: str = "") -> str:
+    def _one(f: dict) -> str:
+        return json.dumps({
+            "id": f.get("id"),
+            "vuln_class": f.get("vuln_class"),
+            "severity": f.get("severity"),
+            "url": f.get("url"),
+            "summary": (f.get("summary") or "")[:400],
+            "repro_curl": f.get("repro_curl"),
+            "evidence_marker": f.get("evidence_marker"),
+            "shell_obtained": bool(f.get("shell_obtained")),
+        }, ensure_ascii=False)
+    body = "\n".join(_one(f) for f in findings)
+    rel = f"\nChain patterns that paid off on similar stacks before:\n{related}\n" if related else ""
+    lang = ""
+    if config.REPORT_LANG == "pt":
+        lang = ("\nIDIOMA: escreva `title`, `summary`, `impact` e cada `steps` em PORTUGUÊS DO BRASIL "
+                "(nível corporativo); mantenha termos técnicos, nomes de endpoints e o conteúdo "
+                "literal de `repro_curl`/`evidence_marker` como estão.\n")
+    return f"""Scope: {scope_note}
+Target: {target}
+
+Confirmed, already-verified findings on this target (combine ≥2 into a higher-impact chain if you can):
+{body}
+{rel}{lang}
+Prove the strongest real chain end-to-end against the in-scope target, or return chained=false.
+"""

@@ -132,7 +132,14 @@ MODEL_LADDERS = {
     "consolidate": ["sonnet", "haiku"],
     "privesc":     ["sonnet", "opus"],
     "council":     ["sonnet", "haiku"],   # 5 cadeiras × achado: barato por padrão
+    "chain":       ["opus", "sonnet"],    # encadear achados em 1 crítico: raciocínio caro
 }
+
+# Exploit-chaining pass: after a round, try to COMBINE separate confirmed
+# findings into a single higher-severity chain (IDOR→ATO, SSRF→metadata,
+# upload→RCE…) and prove it end-to-end. Off -> findings stay independent.
+CHAIN_ENABLED = os.environ.get("SENTINELA_CHAIN", "1").lower() not in ("0", "false", "no")
+CHAIN_MIN_FINDINGS = int(os.environ.get("SENTINELA_CHAIN_MIN", "2"))  # need ≥ this to attempt
 
 MODEL_MAX_ATTEMPTS = 3        # never try more than this many models for one call
 # A slow (not offline) model is abandoned at this fraction of the task's hard
