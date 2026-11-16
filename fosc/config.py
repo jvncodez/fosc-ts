@@ -140,6 +140,23 @@ MODEL_MAX_ATTEMPTS = 3        # never try more than this many models for one cal
 MODEL_ATTEMPT_FRACTION = 0.6
 
 # ---------------------------------------------------------------------------
+# Semantic memory (cross-hunt recall). Embeddings are OPTIONAL and the whole
+# system degrades GRACEFULLY: when no backend is reachable (no boto3/creds, no
+# local model), knowledge recall falls back to the lexical path with ZERO
+# behaviour change. On Bedrock, Amazon Titan Embeddings v2 is used; locally, a
+# sentence-transformers model is used if installed. Everything here is env-
+# overridable so enabling/disabling or swapping the embedder is configuration.
+EMBED_ENABLED = os.environ.get("SENTINELA_EMBED", "1").lower() not in ("0", "false", "no")
+EMBED_PROVIDER = os.environ.get("SENTINELA_EMBED_PROVIDER", "auto").lower()  # auto|bedrock|local|off
+EMBED_BEDROCK_MODEL = os.environ.get("BEDROCK_EMBED", "amazon.titan-embed-text-v2:0")
+EMBED_LOCAL_MODEL = os.environ.get("SENTINELA_EMBED_LOCAL", "all-MiniLM-L6-v2")
+EMBED_DIM = int(os.environ.get("SENTINELA_EMBED_DIM", "256"))  # Titan v2: 256|512|1024
+EMBED_CACHE = KNOWLEDGE_ROOT / "embeddings.jsonl"  # text-hash -> vector, grows once
+# How much the semantic signal counts vs the lexical/recency/kind signal in
+# knowledge.relevant(). 0 = pure lexical (legacy), 1 = pure semantic.
+EMBED_BLEND = float(os.environ.get("SENTINELA_EMBED_BLEND", "0.6"))
+
+# ---------------------------------------------------------------------------
 # Network-level scope enforcement (G0, fosc/scope_proxy.py). When on, the agent's
 # HTTP(S) traffic is routed through an egress proxy that allows ONLY in-scope hosts
 # plus the model-API egress below — so leaving scope is impossible on the wire, not

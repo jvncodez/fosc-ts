@@ -174,6 +174,22 @@ def class_stats() -> dict:
     return stats
 
 
+# Semantic rerank pool: lexical recall first picks this many candidates, then
+# (only if an embedding backend is up) meaning-based similarity reorders them.
+# This bounds embedding cost to the pool, not the whole lesson store, and makes
+# the result never worse than lexical — semantic only reshuffles the top.
+_SEM_PREFILTER = 60
+
+
+def _lex_overlap(item_tech, item_tok, class_tok, les) -> float:
+    """The legacy lexical signal (token overlap only, no kind/recency)."""
+    s = 0.0
+    s += 3 * len(item_tech & {t.lower() for t in les.get("tech") or []})
+    s += 2 * min(3, len(class_tok & _tokens(les.get("vuln_class") or "")))
+    s += 1 * min(4, len(item_tok & _tokens((les.get("pattern") or "") + " " + les.get("text", ""))))
+    return s
+
+
 def relevant(item: dict, classes: list[str], k: int = 8) -> list[dict]:
     lessons = _read("lessons.jsonl", 3000)
     if not lessons:
@@ -182,19 +198,38 @@ def relevant(item: dict, classes: list[str], k: int = 8) -> list[dict]:
     item_tok = _tokens(item.get("pattern", "") + " " + " ".join(item.get("params") or []))
     class_tok = _tokens(" ".join(classes[:5]))
     now = time.time()
-    scored = []
+    pool = []  # (base_score, lex, kind_w, recency, lesson)
     for les in lessons:
-        s = 0.0
-        s += 3 * len(item_tech & {t.lower() for t in les.get("tech") or []})
-        s += 2 * min(3, len(class_tok & _tokens(les.get("vuln_class") or "")))
-        s += 1 * min(4, len(item_tok & _tokens((les.get("pattern") or "") + " " + les.get("text", ""))))
-        s += {"win": 3, "fp": 2}.get(les.get("kind"), 0.5)
-        age_days = (now - les.get("ts", now)) / 86400
-        s *= math.exp(-age_days / 60)  # ~2 month half-ish life
-        if s > 1.0:
-            scored.append((s, les))
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [les for _, les in scored[:k]]
+        lex = _lex_overlap(item_tech, item_tok, class_tok, les)
+        kind_w = {"win": 3, "fp": 2}.get(les.get("kind"), 0.5)
+        rec = math.exp(-((now - les.get("ts", now)) / 86400) / 60)  # ~2mo half-ish life
+        base = (lex + kind_w) * rec
+        if base > 1.0:
+            pool.append((base, lex, kind_w, rec, les))
+    pool.sort(key=lambda x: x[0], reverse=True)
+    pool = pool[: max(k, _SEM_PREFILTER)]
+
+    # Semantic rerank of the lexical top-pool. Off/absent -> exact legacy order.
+    sims = None
+    if config.EMBED_BLEND > 0:
+        from . import semantic
+        if semantic.available():
+            query = " ".join(classes[:5]) + " " + item.get("pattern", "") + " " + \
+                " ".join(item.get("params") or [])
+            docs = [f"{(l.get('vuln_class') or '')} {(l.get('pattern') or '')} {l.get('text', '')}"
+                    for *_, l in pool]
+            sims = semantic.similarities(query, docs)
+    if sims is None:
+        return [les for *_, les in pool[:k]]
+
+    b = config.EMBED_BLEND
+    blended = []
+    for (_, lex, kind_w, rec, les), sim in zip(pool, sims):
+        # BLEND=0 reduces this to the legacy (lex+kind_w)*rec exactly.
+        score = ((1 - b) * lex + b * max(0.0, sim) * 8 + kind_w) * rec
+        blended.append((score, les))
+    blended.sort(key=lambda x: x[0], reverse=True)
+    return [les for _, les in blended[:k]]
 
 
 def format_for_prompt(lessons: list[dict], target: str) -> str:
