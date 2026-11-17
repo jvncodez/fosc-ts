@@ -12,7 +12,7 @@ import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from . import audit, chain, claude_runner, config, council, health, knowledge, models, net, plan, ratectl, replay, toolrunner
+from . import audit, chain, claude_runner, config, council, exploit, health, knowledge, models, net, plan, ratectl, replay, toolrunner
 from .notify import notify_finding
 from .privesc import attempt_privesc
 from .prompts import (CONSOLIDATE_SCHEMA, CONSOLIDATE_SYSTEM, HUNT_SCHEMA, HUNT_SYSTEM,
@@ -232,6 +232,23 @@ def hunt_one(state: RunState, out: Out, target: str, scope_note: str, item: dict
                                          cvss=finding.get("cvss"),
                                          mitre=[t.get("id") for t in finding.get("mitre") or []],
                                          evidence=finding.get("evidence_marker"))
+                    # Exploit standalone + auto-verificação (o entregável que os
+                    # programas pedem). Roda na sessão do agente, em escopo.
+                    if config.EXPLOIT_ENABLED:
+                        try:
+                            ex = exploit.build_exploit(state, target, scope_note, finding,
+                                                       state.task_dir(item), on_activity=act)
+                            if ex.get("built"):
+                                finding["exploit_path"] = ex.get("path")
+                                finding["exploit_verified"] = ex.get("verified")
+                                finding["exploit_language"] = ex.get("language")
+                                finding["exploit_usage"] = ex.get("usage")
+                                finding["exploit_proof"] = ex.get("proof")
+                                res["cost"] = res.get("cost", cost) + ex.get("cost", 0)
+                                act(("exploit verificado ✓" if ex.get("verified") else "exploit gerado")
+                                    + (f" ({ex.get('language')})" if ex.get("language") else ""))
+                        except Exception as e:
+                            out.warn(f"exploit build error: {e}")
                     # passa `finding` (não `f`): carrega o parecer do Conselho e a
                     # severidade/confiança já reclassificadas por ele.
                     finding["report_path"] = write_report(state.dir, finding["id"], target, item, finding,

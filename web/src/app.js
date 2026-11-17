@@ -364,7 +364,7 @@ async function openFindingDrawer(id){
   const tag=(t)=>`<span class="status-pill">${esc(t)}</span>`;
   const hasCouncil=council&&Object.keys(council).length;
   const verdict=hasCouncil?`<span class="fd-verdict ${council.aprovado?'ok':'veto'}">Conselho: ${council.aprovado?'APROVADO':'VETADO'} · ${council.cadeiras_ok??0}/5</span>`:'';
-  if(head)head.innerHTML=`<div><div class="eyebrow">${esc(f.id||id)}${f.vuln_class?` · ${esc(f.vuln_class)}`:''}</div><h2>${esc(f.title||'Achado')}</h2><div class="finding-modal-tags" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><span class="severity-pill ${sev}">${severity[sev]||sev}</span>${f.cvss?tag('CVSS '+f.cvss):''}${f.confidence?tag('Confiança '+cap(f.confidence)):''}${verdict}</div></div><button class="modal-close" data-action="close-modal" aria-label="Fechar">${icon('close')}</button>`;
+  if(head)head.innerHTML=`<div><div class="eyebrow">${esc(f.id||id)}${f.vuln_class?` · ${esc(f.vuln_class)}`:''}</div><h2>${esc(f.title||'Achado')}</h2><div class="finding-modal-tags" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><span class="severity-pill ${sev}">${severity[sev]||sev}</span>${f.cvss?tag('CVSS '+f.cvss):''}${f.confidence?tag('Confiança '+cap(f.confidence)):''}${f.exploit_path?`<span class="fd-verdict ${f.exploit_verified?'ok':''}">Exploit ${f.exploit_verified?'✓ verificado':'gerado'}</span>`:''}${verdict}</div></div><button class="modal-close" data-action="close-modal" aria-label="Fechar">${icon('close')}</button>`;
   const report=res.report||'';
   body.innerHTML=`<div class="fd-body">${findingBody(f, report)}</div>`;
 }

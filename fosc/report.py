@@ -53,6 +53,15 @@ def write_report(run_dir: Path, fid: str, target: str, item: dict, finding: dict
         md += ["", *pocfmt.blocks(finding["repro_curl"])]
     if finding.get("evidence_marker"):
         md += ["", f"Evidência esperada na resposta: `{finding['evidence_marker']}`"]
+    if finding.get("exploit_path"):
+        verif = "sim ✓ (executado em escopo)" if finding.get("exploit_verified") else "não"
+        md += ["", "## Exploit (PoC executável)",
+               f"- **Script:** `{finding['exploit_path']}`" +
+               (f" ({finding['exploit_language']})" if finding.get("exploit_language") else ""),
+               (f"- **Uso:** `{finding['exploit_usage']}`" if finding.get("exploit_usage") else ""),
+               f"- **Auto-verificado:** {verif}"]
+        if finding.get("exploit_proof"):
+            md += ["", "Prova impressa pelo exploit:", "```", str(finding["exploit_proof"])[:600], "```"]
     techs = finding.get("mitre") or mitre.techniques(cls)
     if techs:
         md += ["", "## MITRE ATT&CK",

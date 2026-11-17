@@ -135,6 +135,18 @@ def run_chain_pass(state, out, target: str, scope_note: str, audit_log=None):
         finding["risco_corporativo"] = decisao["risco_corporativo"]
 
     finding = state.add_confirmed(finding)
+    if config.EXPLOIT_ENABLED:
+        try:
+            from . import exploit
+            ex = exploit.build_exploit(state, target, scope_note, finding, task_dir, on_activity=act)
+            if ex.get("built"):
+                finding["exploit_path"] = ex.get("path")
+                finding["exploit_verified"] = ex.get("verified")
+                finding["exploit_language"] = ex.get("language")
+                finding["exploit_usage"] = ex.get("usage")
+                finding["exploit_proof"] = ex.get("proof")
+        except Exception as e:
+            out.warn(f"chain exploit error: {e}")
     try:
         from .report import write_report
         finding["report_path"] = write_report(state.dir, finding["id"], target, item, finding,

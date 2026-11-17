@@ -390,6 +390,54 @@ official repo in a venv — inspect before running, never `curl|sudo bash`, neve
 security); then retry. Record what unblocked you in `lessons` and any tool you installed in `tools_installed`.
 Your final answer is the structured output only."""
 
+EXPLOIT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "built": {"type": "boolean"},
+        "language": {"type": ["string", "null"]},     # python | bash | ...
+        "path": {"type": ["string", "null"]},          # relative path of the script written
+        "usage": {"type": ["string", "null"]},         # one-line how-to-run
+        "proof": {"type": ["string", "null"]},         # what running it printed as proof
+        "verified": {"type": "boolean"},               # did running it reproduce the impact
+        "notes": {"type": ["string", "null"]},
+    },
+    "required": ["built", "verified"],
+}
+
+EXPLOIT_SYSTEM = """You are FOSC's exploit engineer, running headless and
+non-interactive on an AUTHORIZED, in-scope engagement. A vulnerability was already
+confirmed and independently verified. Produce the artifact a bug bounty triager
+asks for: a SELF-CONTAINED, parameterized proof-of-concept EXPLOIT that reproduces
+the issue end-to-end, and then RUN IT yourself against the in-scope target to
+confirm it works.
+
+Requirements:
+- Choose the best language PER CASE: Python (requests/httpx) for stateful or
+  multi-step chains (login -> token -> privileged action, auth bypass, IDOR across
+  accounts); bash+curl for a clean one-shot. Use only the standard library or
+  common, widely available packages.
+- Parameterize it: the target URL and any credentials/tokens go at the top as
+  variables or CLI args — never hard-code throwaway state deep in the script. Open
+  with a short header comment: what it proves, usage, and an AUTHORIZATION note
+  ("authorized security testing only; do not run against systems you don't own or
+  aren't authorized to test").
+- It must run the exploit end-to-end and PRINT a clear, unambiguous PROOF of impact
+  (another user's data returned to you, a forged session acting as admin, a secret
+  read, uid=0 — whatever demonstrates THIS bug), then exit 0 on success / non-zero
+  on failure.
+- NON-DESTRUCTIVE: demonstrate, never damage. No data deletion, no takeover of real
+  users beyond a disposable PoC account, no DoS, no mass or automated-abuse actions.
+- Save the script in the current working directory as `exploit.<ext>`.
+- RUN it against the in-scope target and capture exactly what it prints. Set
+  verified=true ONLY if running it actually reproduced the proof. If it won't
+  verify, still return the best script you wrote, with verified=false and why in
+  notes.
+- Stay strictly in scope: send traffic only to the authorized host.
+
+Return: built, language, path (relative to your working dir), usage, proof (the
+decisive line(s) it printed), verified, notes. Final answer is the structured
+output only."""
+
 CHAIN_SYSTEM = """You are FOSC's exploit-chain operator, running headless and
 non-interactive on an AUTHORIZED, in-scope engagement. You are given several
 findings that were ALREADY independently confirmed and adversarially verified on
@@ -577,4 +625,28 @@ Confirmed, already-verified findings on this target (combine ≥2 into a higher-
 {body}
 {rel}{lang}
 Prove the strongest real chain end-to-end against the in-scope target, or return chained=false.
+"""
+
+
+def build_exploit_prompt(target: str, scope_note: str, finding: dict) -> str:
+    f = json.dumps({
+        "vuln_class": finding.get("vuln_class"),
+        "severity": finding.get("severity"),
+        "url": finding.get("url"),
+        "title": finding.get("title"),
+        "summary": finding.get("summary"),
+        "steps": finding.get("steps") or [],
+        "repro_curl": finding.get("repro_curl"),
+        "evidence_marker": finding.get("evidence_marker"),
+        "shell_howto": finding.get("shell_howto"),
+    }, ensure_ascii=False, indent=2)
+    return f"""Scope: {scope_note}
+Target: {target}
+
+Confirmed, verified vulnerability to turn into a runnable PoC exploit:
+{f}
+
+Write the self-contained exploit, save it as exploit.<ext> in your working
+directory, then RUN it against the in-scope target and report whether it
+reproduced the proof.
 """

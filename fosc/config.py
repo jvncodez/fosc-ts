@@ -133,7 +133,13 @@ MODEL_LADDERS = {
     "privesc":     ["sonnet", "opus"],
     "council":     ["sonnet", "haiku"],   # 5 cadeiras × achado: barato por padrão
     "chain":       ["opus", "sonnet"],    # encadear achados em 1 crítico: raciocínio caro
+    "exploit":     ["sonnet", "opus"],    # escrever+rodar o exploit standalone do achado
 }
+
+# Exploit generation: for each confirmed finding, build a SELF-CONTAINED,
+# runnable PoC exploit (the deliverable bug bounty programs ask for) and have the
+# agent run it in-scope to self-verify. Off -> findings ship with repro_curl only.
+EXPLOIT_ENABLED = os.environ.get("SENTINELA_EXPLOIT", "1").lower() not in ("0", "false", "no")
 
 # Exploit-chaining pass: after a round, try to COMBINE separate confirmed
 # findings into a single higher-severity chain (IDOR→ATO, SSRF→metadata,
